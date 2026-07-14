@@ -64,7 +64,7 @@ const preparedPhotos = event.photos.map((photo) => {
     {preparedPhotos.length > 0 && (
       <div class="event-photo-album" data-event-photo-gallery>
         <div class="event-photos" aria-label={`${event.title}照片预览`}>
-          {preparedPhotos.slice(0, 4).map((photo, index) => (
+          {preparedPhotos.slice(0, 8).map((photo, index) => (
           <button
             type="button"
             data-photo-src={photo.full ? `/media/${photo.full.path}` : ''}
@@ -75,9 +75,9 @@ const preparedPhotos = event.photos.map((photo) => {
             {photo.thumb && <img
               src={`/media/${photo.thumb.path}`}
               srcset={photo.variants.map((variant) => `/media/${variant.path} ${variant.width}w`).join(', ')}
-              sizes="120px" alt={photo.alt} loading="lazy" decoding="async"
+              sizes="160px" alt={photo.alt} loading="lazy" decoding="async"
             />}
-            {index === 3 && preparedPhotos.length > 4 && <span>+{preparedPhotos.length - 4}</span>}
+            {index === 7 && preparedPhotos.length > 8 && <span>+{preparedPhotos.length - 8}</span>}
           </button>
           ))}
         </div>

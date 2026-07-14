@@ -4,6 +4,7 @@ import { parseLocation } from '../../../../server/forms';
 import type { EventType } from '../../../../server/types';
 
 const types = new Set<EventType>(['place', 'transit', 'meal', 'stay', 'note']);
+const timeSource = (body: Record<string, any>) => body.timeSource === 'manual' || (!body.timeSource && body.time) ? 'manual' : 'photo';
 
 export const POST: APIRoute = async ({ request }) => {
   let body: Record<string, any>;
@@ -14,9 +15,9 @@ export const POST: APIRoute = async ({ request }) => {
   const input: EventInput = {
     dayId: String(body.dayId), afterEventId: body.afterEventId ? String(body.afterEventId) : undefined,
     type: body.type, title: String(body.title).trim(), time: body.time || undefined,
+    timeSource: timeSource(body),
     note: body.note || undefined, location: parseLocation(body), data: body.data && typeof body.data === 'object' ? body.data : {},
   };
   try { return Response.json({ ok: true, id: createEvent(input) }, { status: 201 }); }
   catch (error) { console.error(error); return Response.json({ error: 'CREATE_FAILED' }, { status: 500 }); }
 };
-

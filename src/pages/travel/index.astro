@@ -2,14 +2,25 @@
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import PageHeader from '../../components/PageHeader.astro';
 import TravelCard from '../../components/TravelCard.astro';
-import { listTrips } from '../../server/database';
+import { listFlights, listTrips } from '../../server/database';
 
 const trips = listTrips();
+const flights = listFlights();
+const airports = new Set(flights.flatMap((flight) => [flight.fromAirport.code, flight.toAirport.code]));
 ---
 
 <BaseLayout title="旅行" description="旅行计划、清单与途中记录。">
   <div class="container page-shell">
     <PageHeader eyebrow="TRAVEL PLANS" title="旅行" description="把期待、路线和仍待确认的小事放在同一个地方。" count={trips.length} />
+
+    <a class="travel-tool-card" href="/travel/flights/">
+      <div>
+        <p class="eyebrow">FLIGHT LOG</p>
+        <h2>飞行日记</h2>
+        <p>{flights.length} 段航班 · {airports.size} 个机场</p>
+      </div>
+      <span aria-hidden="true">→</span>
+    </a>
 
     <div class="filter-tabs travel-filters" aria-label="按状态筛选">
       <button class="filter-button is-active" type="button" data-status-filter="all">全部</button>

@@ -4,5 +4,6 @@ dist/
 .DS_Store
 data/
 backups/
+航班/
 .env
 .env.production

@@ -34,6 +34,15 @@ function extension(file: File) {
   return allowed.includes(ext) ? ext : '';
 }
 
+function normalizeExifDate(value: unknown) {
+  if (!value) return undefined;
+  if (value instanceof Date) return value.toISOString();
+  const match = String(value).match(/(\d{4})[:/-](\d{2})[:/-](\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (match) return `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6] ?? '00'}`;
+  const parsed = new Date(String(value));
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+}
+
 async function sharpInput(originalPath: string, ext: string, tempPath: string) {
   try {
     await sharp(originalPath).metadata();
@@ -82,16 +91,9 @@ export async function processUpload(
     await writeFile(originalPath, fileBuffer, { flag: 'wx' });
     let takenAt: string | undefined;
     try {
-      const exif = await parseExif(fileBuffer, { pick: ['DateTimeOriginal'] });
-      const raw = exif?.DateTimeOriginal;
-      if (raw) {
-        // ponytail: exifr returns DateTimeOriginal as a Date object; only strings need the YYYY:MM:DD → YYYY-MM-DD fixup
-        const parsed = raw instanceof Date
-          ? raw
-          : new Date(String(raw).replace(/(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3'));
-        if (!isNaN(parsed.getTime())) takenAt = parsed.toISOString();
-      }
-    } catch { /* EXIF 解析失败，使用上传时间作为回退 */ }
+      const exif = await parseExif(fileBuffer, { pick: ['DateTimeOriginal'], reviveValues: false });
+      takenAt = normalizeExifDate(exif?.DateTimeOriginal);
+    } catch {}
     onProgress?.({ stage: 'decoding', percent: 7 });
     inputPath = await sharpInput(originalPath, ext, tempPath);
     const metadata = await sharp(inputPath).metadata();

@@ -1,0 +1,106 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { listAirports } from '../../server/database';
+
+const airports = listAirports();
+---
+
+<BaseLayout title="机场管理">
+  <div class="container page-shell admin-dashboard">
+    <div class="admin-heading">
+      <div><a href="/admin/" class="back-link">← 管理中心</a><p class="eyebrow">AIRPORTS</p><h1>机场</h1></div>
+      <div class="admin-heading-actions"><a class="text-button" href="/admin/flights">飞行日记 →</a></div>
+    </div>
+
+    <section class="flight-import-panel">
+      <h2 data-airport-form-title>新增机场</h2>
+      <form class="flight-manual-form" data-airport-form>
+        <label>机场代码<input name="code" required maxlength="3" placeholder="CTS" /></label>
+        <label>ICAO<input name="icao" maxlength="4" placeholder="RJCC" /></label>
+        <label>名称<input name="name" required placeholder="New Chitose Airport" /></label>
+        <label>城市<input name="city" required placeholder="札幌" /></label>
+        <label>国家/地区<input name="country" placeholder="日本" /></label>
+        <label>时区<input name="timezone" placeholder="Asia/Tokyo" /></label>
+        <label>纬度<input name="lat" type="number" step="any" required placeholder="42.7752" /></label>
+        <label>经度<input name="lng" type="number" step="any" required placeholder="141.6923" /></label>
+        <div class="full admin-editor-actions">
+          <button class="primary-button" type="submit">保存</button>
+          <button class="text-button" type="button" data-airport-reset>清空</button>
+        </div>
+      </form>
+      <p class="form-error" data-airport-error hidden></p>
+    </section>
+
+    <section>
+      <h2>机场（{airports.length}）</h2>
+      <div class="admin-trip-list">
+        {airports.map((airport) => (
+          <div class="admin-trip-row">
+            <a href={`https://www.google.com/maps/search/?api=1&query=${airport.lat},${airport.lng}`} target="_blank" rel="noreferrer">
+              <div><strong>{airport.code} · {airport.city}</strong><span>{airport.name} · {airport.country || '未填国家/地区'} · {airport.lat.toFixed(4)}, {airport.lng.toFixed(4)}</span></div>
+              <span>地图 ↗</span>
+            </a>
+            <button type="button" class="text-button" data-edit-airport={JSON.stringify(airport)}>编辑</button>
+            <button type="button" class="text-button admin-trip-delete" data-delete-airport={airport.code}>删除</button>
+          </div>
+        ))}
+      </div>
+    </section>
+  </div>
+</BaseLayout>
+
+<script>
+  // @ts-nocheck
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '';
+  const api = async (url, options = {}) => fetch(url, { ...options, headers: { ...(options.headers || {}), 'x-csrf-token': csrf } });
+  const form = document.querySelector('[data-airport-form]');
+  const title = document.querySelector('[data-airport-form-title]');
+  const error = document.querySelector('[data-airport-error]');
+
+  function resetForm() {
+    form.reset();
+    form.elements.code.disabled = false;
+    title.textContent = '新增机场';
+    error.hidden = true;
+  }
+
+  document.querySelector('[data-airport-reset]')?.addEventListener('click', resetForm);
+
+  document.querySelectorAll('[data-edit-airport]').forEach((button) => button.addEventListener('click', () => {
+    const airport = JSON.parse(button.dataset.editAirport);
+    resetForm();
+    title.textContent = `编辑 ${airport.code}`;
+    for (const key of ['code', 'icao', 'name', 'city', 'country', 'timezone', 'lat', 'lng']) form.elements[key].value = airport[key] ?? '';
+    form.elements.code.disabled = true;
+    document.querySelector('.flight-import-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }));
+
+  form?.addEventListener('submit', async (submitEvent) => {
+    submitEvent.preventDefault();
+    error.hidden = true;
+    const data = new FormData(form);
+    const body = {
+      code: form.elements.code.value,
+      icao: data.get('icao') || undefined,
+      name: data.get('name'),
+      city: data.get('city'),
+      country: data.get('country') || '',
+      timezone: data.get('timezone') || undefined,
+      lat: Number(data.get('lat')),
+      lng: Number(data.get('lng')),
+    };
+    const response = await api('/api/admin/airports', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    if (response.ok) window.location.reload();
+    else { const result = await response.json().catch(() => ({})); error.textContent = `保存失败：${result.error ?? response.status}`; error.hidden = false; }
+  });
+
+  document.querySelectorAll('[data-delete-airport]').forEach((button) => button.addEventListener('click', async () => {
+    if (!confirm(`删除机场 ${button.dataset.deleteAirport}？`)) return;
+    const response = await api(`/api/admin/airports/${button.dataset.deleteAirport}`, { method: 'DELETE' });
+    if (response.ok) window.location.reload();
+    else {
+      const result = await response.json().catch(() => ({}));
+      alert(result.error === 'AIRPORT_IN_USE' ? '这个机场已有航班使用，不能删除。' : '删除失败。');
+    }
+  }));
+</script>

@@ -2,6 +2,46 @@
 
 一个可自托管的私人入口网站，用于管理知识笔记、旅行计划和常用链接。知识库与链接使用 Markdown / JSON；Travel 使用 SQLite 和服务器图片存储，并提供受保护的网页管理端。
 
+## Project conventions
+
+- Commit messages and push-related notes should be written in English.
+- README and long-lived project documentation should prefer English.
+
+## Runtime data sync
+
+Runtime data is intentionally not committed to Git:
+
+```text
+data/wzt.db
+data/media/
+backups/
+```
+
+Use GitHub for source code and use SSH/rsync for server data.
+
+Configure the server in `.env`:
+
+```env
+SYNC_HOST=example.com
+SYNC_USER=wzt
+SYNC_PORT=22
+SYNC_PATH=/var/www/wzt.hk
+```
+
+Pull production data to local:
+
+```bash
+npm run data:pull
+```
+
+Push local data to the server:
+
+```bash
+npm run data:push
+```
+
+Both scripts create a SQLite backup before replacing the database. Media files are synchronized with `rsync --delete`, so the target mirrors the source.
+
 ## 本地运行
 
 ```bash

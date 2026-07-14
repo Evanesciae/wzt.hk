@@ -1,6 +1,43 @@
 export type TripStatus = 'upcoming' | 'planning' | 'archived';
 export type EventType = 'place' | 'transit' | 'meal' | 'stay' | 'note';
 
+export interface Airport {
+  code: string;
+  icao?: string;
+  name: string;
+  city: string;
+  country: string;
+  lat: number;
+  lng: number;
+  timezone?: string;
+}
+
+export interface Flight {
+  id: string;
+  date: string;
+  flightNumber: string;
+  airlineCode?: string;
+  airlineName?: string;
+  fromAirport: Airport;
+  toAirport: Airport;
+  scheduledDeparture?: string;
+  scheduledArrival?: string;
+  actualDeparture?: string;
+  actualArrival?: string;
+  aircraftType?: string;
+  aircraftReg?: string;
+  cabin?: string;
+  seat?: string;
+  distanceKm?: number;
+  durationMinutes?: number;
+  tripId?: string;
+  note?: string;
+  source?: string;
+  raw?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface KbNote {
   id: string;
   title: string;
@@ -51,6 +88,7 @@ export interface TravelEvent {
   type: EventType;
   title: string;
   time?: string;
+  timeSource: 'photo' | 'manual';
   note?: string;
   location?: { lat: number; lng: number; address?: string };
   data: TravelEventData;

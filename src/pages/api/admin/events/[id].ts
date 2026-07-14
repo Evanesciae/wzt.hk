@@ -5,6 +5,7 @@ import { deletePhotoFiles } from '../../../../server/media';
 import type { EventType } from '../../../../server/types';
 
 const types = new Set<EventType>(['place', 'transit', 'meal', 'stay', 'note']);
+const timeSource = (body: Record<string, any>) => body.timeSource === 'manual' || (!body.timeSource && body.time) ? 'manual' : 'photo';
 
 export const PATCH: APIRoute = async ({ params, request }) => {
   const id = params.id;
@@ -14,6 +15,7 @@ export const PATCH: APIRoute = async ({ params, request }) => {
   if (!body.title?.trim() || !types.has(body.type)) return Response.json({ error: 'INVALID_EVENT' }, { status: 422 });
   updateEvent(id, {
     type: body.type, title: String(body.title).trim(), time: body.time || undefined,
+    timeSource: timeSource(body),
     note: body.note || undefined, location: parseLocation(body), data: body.data && typeof body.data === 'object' ? body.data : {},
   });
   return Response.json({ ok: true });

@@ -1,0 +1,224 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { listFlights, listTrips } from '../../server/database';
+import { airlineNames } from '../../server/airlines';
+
+const flights = listFlights();
+const trips = listTrips(true);
+---
+
+<BaseLayout title="飞行日记管理">
+  <div class="container page-shell admin-dashboard">
+    <div class="admin-heading">
+      <div><a href="/admin/" class="back-link">← 管理中心</a><p class="eyebrow">FLIGHTS</p><h1>飞行日记</h1></div>
+      <div class="admin-heading-actions"><a class="text-button" href="/admin/airports">机场管理</a><a class="text-button" href="/travel/flights/" target="_blank">查看页面 ↗</a></div>
+    </div>
+
+    <section class="flight-import-panel">
+      <h2 data-flight-form-title>新增航班</h2>
+      <form class="flight-manual-form" data-flight-form>
+        <input type="hidden" name="id" />
+        <label>日期<input name="date" type="date" required /></label>
+        <label>航班号<input name="flightNumber" required placeholder="CX919" /></label>
+        <label>航司<input name="airlineName" placeholder="自动识别，可修改" /></label>
+        <label>计划起飞<input name="departureTime" type="time" /></label>
+        <label>计划到达<input name="arrivalTime" type="time" /></label>
+        <label class="form-check-inline"><input name="arrivalNextDay" type="checkbox" /><span>次日到达</span></label>
+
+        <div class="airport-picker" data-airport-picker="from">
+          <label>出发机场<input name="fromAirportSearch" autocomplete="off" placeholder="HKG / 香港 / Hong Kong" required /></label>
+          <div class="airport-selected" data-airport-selected>未选择机场</div>
+          <div class="airport-results" data-airport-results hidden></div>
+        </div>
+        <div class="airport-picker" data-airport-picker="to">
+          <label>到达机场<input name="toAirportSearch" autocomplete="off" placeholder="TPE / 台北 / Taoyuan" required /></label>
+          <div class="airport-selected" data-airport-selected>未选择机场</div>
+          <div class="airport-results" data-airport-results hidden></div>
+        </div>
+
+        <label>机型<input name="aircraftType" placeholder="A321neo" /></label>
+        <label>注册号<input name="aircraftReg" placeholder="B-LRA" /></label>
+        <label>舱位<input name="cabin" placeholder="Economy" /></label>
+        <label>座位<input name="seat" placeholder="32A" /></label>
+        <label class="full">关联旅行<select name="tripId"><option value="">不关联</option>{trips.map((trip) => <option value={trip.id}>{trip.title}</option>)}</select></label>
+        <label class="full">备注<textarea name="note" rows="3"></textarea></label>
+        <div class="full admin-editor-actions">
+          <button class="primary-button" type="submit">保存</button>
+          <button class="text-button" type="button" data-flight-reset>清空</button>
+        </div>
+      </form>
+      <p class="form-error" data-flight-error hidden></p>
+    </section>
+
+    <section>
+      <h2>已添加</h2>
+      <div class="admin-trip-list">
+        {flights.map((flight) => (
+          <div class="admin-trip-row">
+            <a href={`/travel/flights/${flight.id}/`} target="_blank">
+              <div><strong>{flight.flightNumber} · {flight.fromAirport.code} → {flight.toAirport.code}</strong><span>{flight.date} · {flight.airlineName ?? flight.airlineCode ?? '未记录航司'}</span></div>
+              <span>查看 ↗</span>
+            </a>
+            <button type="button" class="text-button" data-edit-flight={JSON.stringify(flight)}>编辑</button>
+            <button type="button" class="text-button admin-trip-delete" data-delete-flight={flight.id} data-flight-title={`${flight.flightNumber} ${flight.fromAirport.code} → ${flight.toAirport.code}`}>删除</button>
+          </div>
+        ))}
+      </div>
+    </section>
+  </div>
+</BaseLayout>
+
+<script is:inline define:vars={{ airlineNames }}>
+  // @ts-nocheck
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '';
+  const api = async (url, options = {}) => fetch(url, { ...options, headers: { ...(options.headers || {}), 'x-csrf-token': csrf } });
+  const form = document.querySelector('[data-flight-form]');
+  const error = document.querySelector('[data-flight-error]');
+  const title = document.querySelector('[data-flight-form-title]');
+  const selectedAirports = { from: null, to: null };
+
+  const normalizeFlightNumber = (value) => String(value ?? '').trim().toUpperCase().replace(/\s+/g, '');
+  const airlineCode = (value) => normalizeFlightNumber(value).match(/^[A-Z0-9]{2}/)?.[0] ?? '';
+  const dateTime = (date, time, nextDay = false) => {
+    if (!date || !time) return undefined;
+    const d = new Date(`${date}T00:00:00`);
+    if (nextDay) d.setDate(d.getDate() + 1);
+    return `${d.toISOString().slice(0, 10)}T${time}:00`;
+  };
+  const airportLabel = (airport) => `${airport.code} · ${airport.city || airport.name}${airport.name && airport.name !== airport.city ? ` · ${airport.name}` : ''}`;
+  const fallbackAirport = (code) => ({ code: code.trim().toUpperCase(), name: code.trim().toUpperCase(), city: code.trim().toUpperCase(), country: '', lat: 0, lng: 0 });
+
+  function setAirport(kind, airport) {
+    selectedAirports[kind] = airport;
+    const picker = document.querySelector(`[data-airport-picker="${kind}"]`);
+    picker.querySelector('input').value = airport ? airportLabel(airport) : '';
+    picker.querySelector('[data-airport-selected]').textContent = airport ? `${airport.code} · ${airport.city} · ${airport.country}` : '未选择机场';
+    picker.querySelector('[data-airport-results]').hidden = true;
+  }
+
+  function resetForm() {
+    form.reset();
+    form.elements.id.value = '';
+    title.textContent = '新增航班';
+    setAirport('from', null);
+    setAirport('to', null);
+    error.hidden = true;
+  }
+
+  async function searchAirport(kind, query) {
+    const picker = document.querySelector(`[data-airport-picker="${kind}"]`);
+    const box = picker.querySelector('[data-airport-results]');
+    if (!query.trim()) { box.hidden = true; return; }
+    const response = await api(`/api/admin/airports/search?q=${encodeURIComponent(query)}`);
+    const data = await response.json().catch(() => ({ airports: [] }));
+    box.innerHTML = '';
+    (data.airports ?? []).forEach((airport) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = airportLabel(airport);
+      button.addEventListener('click', () => setAirport(kind, airport));
+      box.appendChild(button);
+    });
+    const code = query.trim().toUpperCase();
+    if (/^[A-Z0-9]{3}$/.test(code) && !(data.airports ?? []).some((airport) => airport.code === code)) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = `使用 ${code}（稍后补机场坐标）`;
+      button.addEventListener('click', () => setAirport(kind, fallbackAirport(code)));
+      box.appendChild(button);
+    }
+    box.hidden = box.children.length === 0;
+  }
+
+  document.querySelectorAll('[data-airport-picker]').forEach((picker) => {
+    const kind = picker.dataset.airportPicker;
+    const input = picker.querySelector('input');
+    let timer;
+    input.addEventListener('input', () => {
+      selectedAirports[kind] = null;
+      clearTimeout(timer);
+      timer = setTimeout(() => searchAirport(kind, input.value), 160);
+    });
+    input.addEventListener('focus', () => searchAirport(kind, input.value));
+    document.addEventListener('click', (event) => {
+      if (!picker.contains(event.target)) picker.querySelector('[data-airport-results]').hidden = true;
+    });
+  });
+
+  form.elements.flightNumber.addEventListener('input', () => {
+    const code = airlineCode(form.elements.flightNumber.value);
+    if (code) {
+      form.elements.flightNumber.value = normalizeFlightNumber(form.elements.flightNumber.value);
+      if (!form.elements.airlineName.value || Object.values(airlineNames).includes(form.elements.airlineName.value)) {
+        form.elements.airlineName.value = airlineNames[code] ?? '';
+      }
+    }
+  });
+
+  form?.addEventListener('submit', async (submitEvent) => {
+    submitEvent.preventDefault();
+    error.hidden = true;
+    const data = new FormData(form);
+    const flightNumber = normalizeFlightNumber(data.get('flightNumber'));
+    const code = airlineCode(flightNumber);
+    const fromAirport = selectedAirports.from ?? (/^[A-Z0-9]{3}$/.test(String(data.get('fromAirportSearch')).trim().toUpperCase()) ? fallbackAirport(String(data.get('fromAirportSearch'))) : null);
+    const toAirport = selectedAirports.to ?? (/^[A-Z0-9]{3}$/.test(String(data.get('toAirportSearch')).trim().toUpperCase()) ? fallbackAirport(String(data.get('toAirportSearch'))) : null);
+    if (!fromAirport || !toAirport) {
+      error.textContent = '请选择出发和到达机场。';
+      error.hidden = false;
+      return;
+    }
+    const date = String(data.get('date'));
+    const body = {
+      id: data.get('id') || undefined,
+      date,
+      flightNumber,
+      airlineCode: code || undefined,
+      airlineName: data.get('airlineName') || (code ? airlineNames[code] : undefined),
+      fromAirport,
+      toAirport,
+      scheduledDeparture: dateTime(date, data.get('departureTime')),
+      scheduledArrival: dateTime(date, data.get('arrivalTime'), form.elements.arrivalNextDay.checked),
+      aircraftType: data.get('aircraftType') || undefined,
+      aircraftReg: data.get('aircraftReg') || undefined,
+      cabin: data.get('cabin') || undefined,
+      seat: data.get('seat') || undefined,
+      tripId: data.get('tripId') || undefined,
+      note: data.get('note') || undefined,
+      source: 'manual',
+    };
+    const response = await api('/api/admin/flights', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    if (response.ok) window.location.reload();
+    else { const result = await response.json().catch(() => ({})); error.textContent = `保存失败：${result.error ?? response.status}`; error.hidden = false; }
+  });
+
+  document.querySelector('[data-flight-reset]')?.addEventListener('click', resetForm);
+
+  document.querySelectorAll('[data-edit-flight]').forEach((button) => button.addEventListener('click', () => {
+    const flight = JSON.parse(button.dataset.editFlight);
+    resetForm();
+    title.textContent = '编辑航班';
+    form.elements.id.value = flight.id;
+    form.elements.date.value = flight.date;
+    form.elements.flightNumber.value = flight.flightNumber;
+    form.elements.airlineName.value = flight.airlineName ?? '';
+    form.elements.departureTime.value = flight.scheduledDeparture?.slice(11, 16) ?? '';
+    form.elements.arrivalTime.value = flight.scheduledArrival?.slice(11, 16) ?? '';
+    form.elements.arrivalNextDay.checked = flight.scheduledArrival?.slice(0, 10) > flight.date;
+    form.elements.aircraftType.value = flight.aircraftType ?? '';
+    form.elements.aircraftReg.value = flight.aircraftReg ?? '';
+    form.elements.cabin.value = flight.cabin ?? '';
+    form.elements.seat.value = flight.seat ?? '';
+    form.elements.tripId.value = flight.tripId ?? '';
+    form.elements.note.value = flight.note ?? '';
+    setAirport('from', flight.fromAirport);
+    setAirport('to', flight.toAirport);
+    document.querySelector('.flight-import-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }));
+
+  document.querySelectorAll('[data-delete-flight]').forEach((button) => button.addEventListener('click', async () => {
+    if (!confirm(`删除“${button.dataset.flightTitle}”？`)) return;
+    const response = await api(`/api/admin/flights/${button.dataset.deleteFlight}`, { method: 'DELETE' });
+    if (response.ok) window.location.reload(); else alert('删除失败。');
+  }));
+</script>

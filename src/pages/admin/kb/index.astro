@@ -52,7 +52,7 @@ const notes = listKbNotes(true);
   });
 
   document.querySelectorAll('[data-delete-note]').forEach((button) => button.addEventListener('click', async () => {
-    if (!confirm(`删除“${button.dataset.noteTitle}”？此操作不可撤销。`)) return;
+    if (!confirm(`删除“${button.dataset.noteTitle}”？`)) return;
     const response = await api(`/api/admin/kb/${button.dataset.deleteNote}`, { method: 'DELETE' });
     if (response.ok) window.location.reload(); else alert('删除失败。');
   }));

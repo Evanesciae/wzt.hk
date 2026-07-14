@@ -3,10 +3,11 @@ import { getCollection } from 'astro:content';
 import BaseLayout from '../layouts/BaseLayout.astro';
 import KbCard from '../components/KbCard.astro';
 import TravelCard from '../components/TravelCard.astro';
-import { listKbNotes, listTrips } from '../server/database';
+import { listFlights, listKbNotes, listTrips } from '../server/database';
 
 const notes = listKbNotes();
 const trips = listTrips();
+const flights = listFlights();
 const links = (await getCollection('links')).sort((a, b) => a.data.order - b.data.order);
 const currentTrip = trips.find((trip) => trip.status === 'upcoming')
   ?? trips.find((trip) => trip.status === 'planning');
@@ -23,7 +24,7 @@ const pinnedLinks = links.filter((link) => link.data.pinned).slice(0, 4);
       </a>
       <a class="portal-card" href="/travel/">
         <span class="portal-icon">T</span>
-        <div><h2>旅行</h2><p>{trips.length} 个计划</p></div>
+        <div><h2>旅行</h2><p>{trips.length} 个计划 · {flights.length} 段航班</p></div>
         <span class="portal-arrow">→</span>
       </a>
       <a class="portal-card" href="/links/">

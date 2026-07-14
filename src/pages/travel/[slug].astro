@@ -23,7 +23,6 @@ const mapDays = days.map((day) => ({
   points: day.events.flatMap((event, index) => {
     const hasLocalStops = day.events.some((item) => item.type !== 'transit' && item.location);
     const includeTransitOrigin = event.type !== 'transit' || !hasLocalStops;
-    // ponytail: 地球上没有合法的 (0,0) 旅游坐标，跳过空/无效点，避免无地址事件画到几内亚湾
     const validPoint = (lat: number, lng: number) => Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0);
     const points = event.location && includeTransitOrigin && validPoint(event.location.lat, event.location.lng) ? [{
       lat: event.location.lat, lng: event.location.lng,
@@ -115,13 +114,34 @@ const photoDays = days.map((day) => ({
 </BaseLayout>
 
 <script>
-  const sections = document.querySelectorAll<HTMLElement>('[data-travel-day]');
+  const sections = [...document.querySelectorAll<HTMLElement>('[data-travel-day]')];
   if (sections.length > 0) {
-    const observer = new IntersectionObserver((entries) => {
-      const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-      const id = (visible?.target as HTMLElement | undefined)?.dataset.travelDay;
-      if (id) document.dispatchEvent(new CustomEvent('travel-day-change', { detail: id }));
-    }, { rootMargin: '-22% 0px -58% 0px', threshold: [0, .15, .4] });
-    sections.forEach((section) => observer.observe(section));
+    let active = '';
+    let ticking = false;
+    const updateMapDay = () => {
+      ticking = false;
+      const line = Math.min(window.innerHeight * 0.38, 340);
+      let current = sections[0];
+      for (const section of sections) {
+        if (section.getBoundingClientRect().top <= line) current = section;
+        else break;
+      }
+      const id = current.dataset.travelDay;
+      if (id && id !== active) {
+        active = id;
+        document.dispatchEvent(new CustomEvent('travel-day-change', { detail: id }));
+      }
+    };
+    const schedule = () => {
+      if (!ticking) {
+        ticking = true;
+        requestAnimationFrame(updateMapDay);
+      }
+    };
+    updateMapDay();
+    window.addEventListener('scroll', schedule, { passive: true });
+    window.addEventListener('resize', schedule);
+    window.addEventListener('load', schedule);
+    setTimeout(schedule, 250);
   }
 </script>

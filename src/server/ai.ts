@@ -1,6 +1,3 @@
-// DeepSeek (OpenAI-compatible) AI proxy client. Key stays server-side only.
-// Model-agnostic via env: AI_API_KEY / AI_BASE_URL / AI_MODEL.
-
 const AI_API_KEY = process.env.AI_API_KEY;
 const AI_BASE_URL = process.env.AI_BASE_URL || 'https://api.deepseek.com';
 const AI_MODEL = process.env.AI_MODEL || 'deepseek-chat';

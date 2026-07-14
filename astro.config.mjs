@@ -9,7 +9,6 @@ export default defineConfig({
     format: 'directory',
   },
   vite: {
-    // MapLibre is intentionally isolated in a lazy-loaded map chunk (~1 MB minified).
     build: { chunkSizeWarningLimit: 1100 },
   },
 });

@@ -13,6 +13,8 @@
     "preview": "ASTRO_TELEMETRY_DISABLED=1 astro preview",
     "admin:password": "node ./scripts/hash-password.mjs",
     "backup": "sh ./scripts/backup.sh",
+    "data:pull": "sh ./scripts/pull-data.sh",
+    "data:push": "sh ./scripts/push-data.sh",
     "check": "ASTRO_TELEMETRY_DISABLED=1 astro check"
   },
   "dependencies": {

@@ -7,14 +7,14 @@ const trips = listTrips(true);
 
 <BaseLayout title="管理中心">
   <div class="container page-shell admin-dashboard">
-    <div class="admin-heading"><div><p class="eyebrow">ADMIN</p><h1>管理中心</h1></div><div class="admin-heading-actions"><button type="button" class="text-button" data-new-trip>新建行程</button><a class="text-button" href="/admin/travel/generate">AI 生成行程</a><button type="button" class="text-button" data-logout>退出登录</button></div></div>
+    <div class="admin-heading"><div><p class="eyebrow">ADMIN</p><h1>管理中心</h1></div><div class="admin-heading-actions"><button type="button" class="text-button" data-new-trip>新建行程</button><a class="text-button" href="/admin/flights">飞行日记</a><a class="text-button" href="/admin/airports">机场</a><a class="text-button" href="/admin/travel/generate">AI 生成行程</a><button type="button" class="text-button" data-logout>退出登录</button></div></div>
     <section><h2>旅行</h2><div class="admin-trip-list">{trips.map((trip) => (
       <div class="admin-trip-row">
         <a href={`/admin/travel/${trip.id}`}><div><strong>{trip.title}</strong><span>{trip.destination}</span></div><span>编辑 →</span></a>
         <button type="button" class="text-button admin-trip-delete" data-delete-trip={trip.id} data-trip-title={trip.title}>删除</button>
       </div>
     ))}</div></section>
-    <section><div class="admin-heading-actions" style="margin-bottom:20px"><a class="text-button" href="/admin/kb">知识库管理 →</a></div></section>
+    <section><div class="admin-heading-actions" style="margin-bottom:20px"><a class="text-button" href="/admin/kb">知识库管理 →</a><a class="text-button" href="/admin/flights">飞行日记 →</a><a class="text-button" href="/admin/airports">机场管理 →</a></div></section>
   </div>
 
   <dialog class="event-editor-dialog" data-trip-dialog>
@@ -60,7 +60,7 @@ const trips = listTrips(true);
   });
 
   document.querySelectorAll('[data-delete-trip]').forEach((button) => button.addEventListener('click', async () => {
-    if (!confirm(`删除“${button.dataset.tripTitle}”及其全部日期、模块和照片？此操作不可撤销。`)) return;
+    if (!confirm(`删除“${button.dataset.tripTitle}”及其全部日期、模块和照片？`)) return;
     const response = await api(`/api/admin/trips/${button.dataset.deleteTrip}`, { method: 'DELETE' });
     if (response.ok) window.location.reload(); else alert('删除失败。');
   }));

@@ -1,0 +1,151 @@
+---
+import 'maplibre-gl/dist/maplibre-gl.css';
+import type { Flight } from '../server/types';
+
+interface Props {
+  flights: Flight[];
+  compact?: boolean;
+}
+
+const { flights, compact = false } = Astro.props;
+const routes = flights.map((flight) => ({
+  id: flight.id,
+  title: `${flight.date} · ${flight.flightNumber} · ${flight.fromAirport.code} → ${flight.toAirport.code}`,
+  from: { code: flight.fromAirport.code, city: flight.fromAirport.city, lat: flight.fromAirport.lat, lng: flight.fromAirport.lng },
+  to: { code: flight.toAirport.code, city: flight.toAirport.city, lat: flight.toAirport.lat, lng: flight.toAirport.lng },
+})).filter((route) => route.from.lat && route.from.lng && route.to.lat && route.to.lng);
+---
+
+<div class:list={['flight-map-frame', compact && 'flight-map-compact']} data-flight-map data-routes={JSON.stringify(routes)}>
+  <button class="map-fullscreen-button" type="button" data-flight-map-fullscreen aria-label="全屏查看飞行地图">全屏</button>
+  <div class="map-canvas" data-flight-map-canvas aria-label="飞行地图"></div>
+  {routes.length === 0 && <div class="map-empty">还没有可绘制的航线。</div>}
+</div>
+
+<script>
+  interface RoutePoint { code: string; city: string; lat: number; lng: number }
+  interface Route { id: string; title: string; from: RoutePoint; to: RoutePoint }
+  interface DrawableRoute extends Route { curve: number }
+
+  function arc(from: RoutePoint, to: RoutePoint, curve: number) {
+    const points = [];
+    const dx = to.lng - from.lng;
+    const dy = to.lat - from.lat;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    const normalLng = distance ? -dy / distance : 0;
+    const normalLat = distance ? dx / distance : 0;
+    const lift = Math.min(Math.max(distance * curve, 1.4), 14);
+    const control = {
+      lng: (from.lng + to.lng) / 2 + normalLng * lift,
+      lat: (from.lat + to.lat) / 2 + normalLat * lift,
+    };
+    for (let i = 0; i <= 64; i += 1) {
+      const t = i / 64;
+      const a = (1 - t) * (1 - t);
+      const b = 2 * (1 - t) * t;
+      const c = t * t;
+      const lng = a * from.lng + b * control.lng + c * to.lng;
+      const lat = a * from.lat + b * control.lat + c * to.lat;
+      points.push([lng, lat]);
+    }
+    return points;
+  }
+
+  function routeKey(route: Route) {
+    return `${route.from.code}-${route.to.code}`;
+  }
+
+  function spreadRoutes(routes: Route[]): DrawableRoute[] {
+    const counts = new Map<string, number>();
+    return routes.map((route) => {
+      const key = routeKey(route);
+      const index = counts.get(key) ?? 0;
+      counts.set(key, index + 1);
+      return { ...route, curve: .18 + index * .055 };
+    });
+  }
+
+  document.querySelectorAll<HTMLElement>('[data-flight-map]').forEach(async (root) => {
+    if (root.dataset.ready) return;
+    root.dataset.ready = 'true';
+    const routes: Route[] = JSON.parse(root.dataset.routes ?? '[]');
+    const canvas = root.querySelector<HTMLElement>('[data-flight-map-canvas]');
+    const fullscreenButton = root.querySelector<HTMLButtonElement>('[data-flight-map-fullscreen]');
+    if (!canvas || routes.length === 0) return;
+    const { default: maplibregl } = await import('maplibre-gl');
+    const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const first = routes[0];
+    const drawableRoutes = spreadRoutes(routes);
+    const map = new maplibregl.Map({
+      container: canvas,
+      style: `https://tiles.openfreemap.org/styles/${dark ? 'dark' : 'positron'}`,
+      center: [(first.from.lng + first.to.lng) / 2, (first.from.lat + first.to.lat) / 2],
+      zoom: 3,
+      cooperativeGestures: true,
+    });
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+    fullscreenButton?.addEventListener('click', async () => {
+      if (document.fullscreenElement === root) {
+        await document.exitFullscreen();
+      } else {
+        await root.requestFullscreen();
+      }
+      setTimeout(() => map.resize(), 80);
+    });
+    document.addEventListener('fullscreenchange', () => {
+      fullscreenButton && (fullscreenButton.textContent = document.fullscreenElement === root ? '退出全屏' : '全屏');
+      map.resize();
+    });
+
+    const routeFeatures = drawableRoutes.map((route) => ({
+      type: 'Feature' as const,
+      properties: { title: route.title },
+      geometry: { type: 'LineString' as const, coordinates: arc(route.from, route.to, route.curve) },
+    }));
+    const airportMap = new Map<string, RoutePoint>();
+    routes.forEach((route) => {
+      airportMap.set(route.from.code, route.from);
+      airportMap.set(route.to.code, route.to);
+    });
+    const airportFeatures = [...airportMap.values()].map((airport) => ({
+      type: 'Feature' as const,
+      properties: { code: airport.code, title: `${airport.city} ${airport.code}` },
+      geometry: { type: 'Point' as const, coordinates: [airport.lng, airport.lat] as [number, number] },
+    }));
+
+    map.on('load', () => {
+      map.addSource('flight-routes', { type: 'geojson', data: { type: 'FeatureCollection', features: routeFeatures } });
+      map.addLayer({
+        id: 'flight-routes',
+        type: 'line',
+        source: 'flight-routes',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': dark ? '#b8c6c1' : '#4f625d', 'line-width': 2, 'line-opacity': .72 },
+      });
+      map.addSource('flight-airports', { type: 'geojson', data: { type: 'FeatureCollection', features: airportFeatures } });
+      map.addLayer({
+        id: 'flight-airports-dot',
+        type: 'circle',
+        source: 'flight-airports',
+        paint: { 'circle-radius': 5, 'circle-color': dark ? '#e8e8e5' : '#191919', 'circle-stroke-color': dark ? '#191919' : '#fff', 'circle-stroke-width': 2 },
+      });
+      map.addLayer({
+        id: 'flight-airports-label',
+        type: 'symbol',
+        source: 'flight-airports',
+        layout: { 'text-field': ['get', 'code'], 'text-size': 11, 'text-offset': [0, 1.25], 'text-anchor': 'top' },
+        paint: { 'text-color': dark ? '#e8e8e5' : '#191919', 'text-halo-color': dark ? '#191919' : '#fff', 'text-halo-width': 1.2 },
+      });
+      const bounds = new maplibregl.LngLatBounds();
+      airportFeatures.forEach((feature) => bounds.extend(feature.geometry.coordinates as [number, number]));
+      if (!bounds.isEmpty()) map.fitBounds(bounds, { padding: 70, maxZoom: 7, duration: 0 });
+      map.on('mouseenter', 'flight-routes', () => { canvas.style.cursor = 'pointer'; });
+      map.on('mouseleave', 'flight-routes', () => { canvas.style.cursor = ''; });
+      map.on('click', 'flight-routes', (event) => {
+        const feature = event.features?.[0];
+        const coordinates = event.lngLat;
+        if (feature?.properties?.title) new maplibregl.Popup({ offset: 12 }).setLngLat(coordinates).setText(feature.properties.title).addTo(map);
+      });
+    });
+  });
+</script>

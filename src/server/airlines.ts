@@ -1,0 +1,38 @@
+export const airlineNames: Record<string, string> = {
+  CX: '国泰航空',
+  KA: '港龙航空',
+  HX: '香港航空',
+  UO: '香港快运',
+  BR: '长荣航空',
+  CI: '中华航空',
+  JX: '星宇航空',
+  JL: '日本航空',
+  NH: '全日空',
+  KE: '大韩航空',
+  OZ: '韩亚航空',
+  SQ: '新加坡航空',
+  TG: '泰国航空',
+  CA: '中国国际航空',
+  MU: '中国东方航空',
+  CZ: '中国南方航空',
+  MF: '厦门航空',
+  HU: '海南航空',
+  ZH: '深圳航空',
+  '3U': '四川航空',
+  HO: '吉祥航空',
+  FM: '上海航空',
+  QR: '卡塔尔航空',
+  EK: '阿联酋航空',
+  TK: '土耳其航空',
+  BA: '英国航空',
+  LH: '汉莎航空',
+  AF: '法国航空',
+  KL: '荷兰皇家航空',
+  UA: '联合航空',
+  AA: '美国航空',
+  DL: '达美航空',
+};
+
+export function airlineCodeFromFlightNumber(value: string) {
+  return value.trim().toUpperCase().match(/^[A-Z0-9]{2}/)?.[0];
+}

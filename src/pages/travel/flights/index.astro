@@ -1,0 +1,71 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import PageHeader from '../../../components/PageHeader.astro';
+import FlightMap from '../../../components/FlightMap.astro';
+import { listFlights } from '../../../server/database';
+import { formatDate } from '../../../lib/content';
+
+const flights = listFlights();
+const airports = new Set(flights.flatMap((flight) => [flight.fromAirport.code, flight.toAirport.code]));
+const totalDistance = flights.reduce((total, flight) => total + (flight.distanceKm ?? 0), 0);
+const airlineCounts = flights.reduce((map, flight) => {
+  const name = flight.airlineName ?? flight.airlineCode ?? '未记录';
+  map.set(name, (map.get(name) ?? 0) + 1);
+  return map;
+}, new Map<string, number>());
+const topAirline = [...airlineCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '—';
+
+function date(value: string) {
+  return new Date(`${value.slice(0, 10)}T00:00:00`);
+}
+
+function time(value?: string) {
+  return value ? value.slice(11, 16) : '—';
+}
+
+function duration(minutes?: number) {
+  if (!minutes) return '—';
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+---
+
+<BaseLayout title="飞行日记" description="旅行里的航班、机场和航线。">
+  <div class="container page-shell flights-page">
+    <a class="back-link" href="/travel/">← 旅行</a>
+    <PageHeader eyebrow="TRAVEL / FLIGHT LOG" title="飞行日记" description="按时间记录旅行里的航班。" count={flights.length} />
+
+    <section class="flight-stats" aria-label="飞行统计">
+      <div><span>总航班</span><strong>{flights.length}</strong></div>
+      <div><span>总里程</span><strong>{Math.round(totalDistance).toLocaleString()} km</strong></div>
+      <div><span>机场</span><strong>{airports.size}</strong></div>
+      <div><span>常坐航司</span><strong>{topAirline}</strong></div>
+    </section>
+
+    <section class="flight-map-section">
+      <div class="section-heading trip-section-heading"><div><p class="eyebrow">MAP</p><h2>飞行地图</h2></div></div>
+      <FlightMap flights={flights} />
+    </section>
+
+    <section class="flight-log-section">
+      <div class="section-heading trip-section-heading"><div><p class="eyebrow">TIMELINE</p><h2>航班</h2></div></div>
+      <div class="flight-list">
+        {flights.map((flight) => (
+          <a class="flight-row" href={`/travel/flights/${flight.id}/`}>
+            <time datetime={flight.date}>{formatDate(date(flight.date))}</time>
+            <div>
+              <strong>{flight.fromAirport.city} {flight.fromAirport.code} → {flight.toAirport.city} {flight.toAirport.code}</strong>
+              <span>{flight.flightNumber} · {flight.airlineName ?? flight.airlineCode ?? '未记录航司'}</span>
+            </div>
+            <div>
+              <span>{time(flight.scheduledDeparture)} → {time(flight.scheduledArrival)}</span>
+              <span>{duration(flight.durationMinutes)} · {flight.distanceKm ? `${flight.distanceKm} km` : '—'}</span>
+            </div>
+          </a>
+        ))}
+      </div>
+      {flights.length === 0 && <p class="empty-note">还没有航班。去管理中心添加。</p>}
+    </section>
+  </div>
+</BaseLayout>

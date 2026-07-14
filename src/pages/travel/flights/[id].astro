@@ -1,0 +1,62 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import FlightMap from '../../../components/FlightMap.astro';
+import { getFlight } from '../../../server/database';
+import { formatDate } from '../../../lib/content';
+
+const id = Astro.params.id;
+const flight = id ? getFlight(id) : undefined;
+if (!flight) return Astro.redirect('/404');
+
+function date(value: string) {
+  return new Date(`${value.slice(0, 10)}T00:00:00`);
+}
+
+function time(value?: string) {
+  return value ? value.slice(11, 16) : '—';
+}
+
+function duration(minutes?: number) {
+  if (!minutes) return '—';
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+---
+
+<BaseLayout title={`${flight.flightNumber} · 飞行日记`}>
+  <div class="container trip-page-shell">
+    <a href="/travel/flights/" class="back-link">← 飞行日记</a>
+    <header class="article-header">
+      <p class="eyebrow">{flight.airlineName ?? flight.airlineCode ?? 'FLIGHT'}</p>
+      <h1>{flight.fromAirport.code} → {flight.toAirport.code}</h1>
+      <p>{flight.flightNumber} · {formatDate(date(flight.date))}</p>
+    </header>
+
+    <section class="flight-detail-grid">
+      <div class="flight-detail-card">
+        <dl class="trip-facts">
+          <div><dt>出发</dt><dd>{flight.fromAirport.city} {flight.fromAirport.code}</dd></div>
+          <div><dt>到达</dt><dd>{flight.toAirport.city} {flight.toAirport.code}</dd></div>
+          <div><dt>时间</dt><dd>{time(flight.scheduledDeparture)} → {time(flight.scheduledArrival)}</dd></div>
+          <div><dt>时长</dt><dd>{duration(flight.durationMinutes)}</dd></div>
+          <div><dt>距离</dt><dd>{flight.distanceKm ? `${flight.distanceKm} km` : '—'}</dd></div>
+          <div><dt>机型</dt><dd>{flight.aircraftType ?? '—'}</dd></div>
+        </dl>
+      </div>
+      <FlightMap flights={[flight]} compact />
+    </section>
+
+    {(flight.aircraftReg || flight.seat || flight.cabin || flight.note) && (
+      <section class="trip-overview">
+        <div class="section-heading trip-section-heading"><div><p class="eyebrow">DETAILS</p><h2>记录</h2></div></div>
+        <div class="prose">
+          {flight.aircraftReg && <p>注册号：{flight.aircraftReg}</p>}
+          {flight.cabin && <p>舱位：{flight.cabin}</p>}
+          {flight.seat && <p>座位：{flight.seat}</p>}
+          {flight.note && <p>{flight.note}</p>}
+        </div>
+      </section>
+    )}
+  </div>
+</BaseLayout>

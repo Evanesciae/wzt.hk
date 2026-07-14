@@ -24,8 +24,6 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
       </div>
     </header>
 
-    <div class="admin-notice">所有修改会立即写入服务器数据库。上传原图后，网页版本将在服务器生成。</div>
-
     <div class="admin-days" data-day-list>
       <button class="timeline-insert" type="button" data-add-day><span>＋</span><em>添加日期</em></button>
       {trip.days.map((day, dayIndex) => (
@@ -40,7 +38,11 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
                   <div class="admin-event-content">
                     <span class="admin-event-type">{typeLabels[event.type]}</span><h3>{event.title}</h3>
                     {event.note && <p>{event.note}</p>}
-                    <div class="admin-event-meta"><span>{event.photos.length} 张照片</span>{event.location && <span>{event.location.lat.toFixed(4)}, {event.location.lng.toFixed(4)}</span>}</div>
+                    <div class="admin-event-meta">
+                      <span>{event.photos.length} 张照片</span>
+                      {event.time && <span>{event.time}{event.timeSource === 'photo' ? ' · 照片' : ''}</span>}
+                      {event.location && <span>{event.location.lat.toFixed(4)}, {event.location.lng.toFixed(4)}</span>}
+                    </div>
                     {event.photos.length > 0 && <div class="admin-photo-strip" data-photo-strip>{event.photos.map((photo) => {
                       const thumb = [...photo.variants].sort((a, b) => a.width - b.width)[0];
                       return thumb && <span class="admin-photo-item" draggable="true" data-photo-id={photo.id}><img src={`/media/${thumb.path}`} alt={photo.alt} loading="lazy" /><button type="button" class="admin-photo-delete" data-delete-photo={photo.id} title="删除照片">×</button></span>;
@@ -76,7 +78,8 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
       ))}</fieldset>
       <div class="form-grid">
         <label class="full">标题<input name="title" required maxlength="120" /></label>
-        <label>时间（可选）<input name="time" type="time" /></label>
+        <label>到达时间<input name="time" type="time" step="3600" /></label>
+        <label>时间来源<select name="timeSource"><option value="photo">照片</option><option value="manual">手填</option></select></label>
         <label>地址（可选）<input name="address" /></label>
         <label>纬度<input name="lat" type="number" step="any" /></label>
         <label>经度<input name="lng" type="number" step="any" /></label>
@@ -152,7 +155,7 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
 </BaseLayout>
 
 <script>
-  // @ts-nocheck -- DOM types are validated through browser integration tests.
+  // @ts-nocheck
   const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '';
   const dialog = document.querySelector('[data-event-dialog]');
   const form = dialog?.querySelector('[data-event-form]');
@@ -164,6 +167,9 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
     dialog?.querySelectorAll('[data-fields]').forEach((fields) => fields.hidden = fields.dataset.fields !== type);
   }
   dialog?.querySelectorAll('input[name="type"]').forEach((input) => input.addEventListener('change', () => setType(input.value)));
+  form?.elements.namedItem('time')?.addEventListener('input', () => {
+    if (form.elements.time.value) form.elements.timeSource.value = 'manual';
+  });
   document.querySelectorAll('[data-dialog-close]').forEach((button) => button.addEventListener('click', () => button.closest('dialog')?.close()));
 
   document.querySelectorAll('[data-add-event]').forEach((button) => button.addEventListener('click', () => {
@@ -176,6 +182,7 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
     form.reset(); title.textContent = '编辑模块'; form.elements.eventId.value = event.id;
     form.elements.dayId.value = event.dayId; form.elements.type.value = event.type; form.elements.title.value = event.title;
     for (const key of ['time','note']) form.elements[key].value = event[key] ?? '';
+    form.elements.timeSource.value = event.timeSource ?? (event.time ? 'manual' : 'photo');
     for (const key of ['address','lat','lng']) form.elements[key].value = key === 'address' ? event.location?.address ?? '' : event.location?.[key] ?? '';
     for (const key of ['from','to','method','number','mealType','cost','rating','booking','category']) form.elements[key].value = event.data?.[key] ?? '';
     for (const key of ['endAddress']) form.elements[key].value = event.data?.endLocation?.[key] ?? '';
@@ -196,7 +203,7 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
       extra.endLocation = { lat: Number(endLat), lng: Number(endLng) };
       if (data.get('endAddress')) extra.endLocation.address = String(data.get('endAddress'));
     }
-    const body = { dayId: data.get('dayId'), afterEventId: data.get('afterEventId'), type, title: data.get('title'), time: data.get('time'), note: data.get('note'), address: data.get('address'), lat: data.get('lat'), lng: data.get('lng'), data: extra };
+    const body = { dayId: data.get('dayId'), afterEventId: data.get('afterEventId'), type, title: data.get('title'), time: data.get('time'), timeSource: data.get('timeSource'), note: data.get('note'), address: data.get('address'), lat: data.get('lat'), lng: data.get('lng'), data: extra };
     const eventId = data.get('eventId');
     const response = await api(eventId ? `/api/admin/events/${eventId}` : '/api/admin/events', {
       method: eventId ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
@@ -204,7 +211,6 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
     if (response.ok) window.location.reload(); else { error.textContent = '保存失败，请检查输入。'; error.hidden = false; }
   });
 
-  // 地图选点：Nominatim 地址搜索 + 可拖动图钉，回填 lat/lng/address
   const geoMapEl = dialog?.querySelector('[data-geo-map]');
   const geoSearch = dialog?.querySelector('[data-geo-search]');
   const geoResults = dialog?.querySelector('[data-geo-results]');
@@ -277,7 +283,6 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
   });
   geoSearch?.addEventListener('input', () => { if (geoResults && !geoResults.hidden && !geoSearch.value) geoResults.hidden = true; });
 
-  // AI 助手（旅行内容用随手模式，不传 strict）
   document.querySelectorAll('[data-ai]').forEach((button) => button.addEventListener('click', async () => {
     const task = button.dataset.ai;
     const formEl = button.closest('dialog')?.querySelector('form');
@@ -305,7 +310,6 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
     if (response.ok) window.location.reload(); else alert('删除失败。');
   }));
 
-  // 行程信息编辑
   const tripDialog = document.querySelector('[data-trip-dialog]');
   const tripForm = tripDialog?.querySelector('[data-trip-form]');
   const tripError = tripDialog?.querySelector('[data-trip-error]');
@@ -332,7 +336,6 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
     if (response.ok) window.location.reload(); else { tripError.textContent = '保存失败，请检查输入。'; tripError.hidden = false; }
   });
 
-  // 日期(天)增删改
   const dayDialog = document.querySelector('[data-day-dialog]');
   const dayForm = dayDialog?.querySelector('[data-day-form]');
   const dayError = dayDialog?.querySelector('[data-day-error]');
@@ -366,7 +369,6 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
     if (response.ok) window.location.reload(); else alert('删除失败。');
   }));
 
-  // 日期拖拽排序
   const dayList = document.querySelector('[data-day-list]');
   if (dayList) {
     let dragDayId = null;
@@ -402,7 +404,7 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
   document.querySelectorAll('[data-delete-photo]').forEach((button) => button.addEventListener('click', async (e) => {
     e.stopPropagation();
     const photoId = button.dataset.deletePhoto;
-    if (!confirm('确定删除这张照片？此操作不可撤销。')) return;
+    if (!confirm('删除这张照片？')) return;
     try {
       const response = await api(`/api/admin/photos/${photoId}`, { method: 'DELETE' });
       if (response.ok) { window.location.reload(); return; }
@@ -413,7 +415,6 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
     }
   }));
 
-  // 拖动排序：无拍摄时间的照片会沉底，用拖拽手动归位；首次拖拽后该模块改为手动排序。
   const orderOf = (strip) => [...strip.querySelectorAll('[data-photo-id]')].map((item) => item.dataset.photoId);
   document.querySelectorAll('[data-photo-strip]').forEach((strip) => {
     let dragId = null;

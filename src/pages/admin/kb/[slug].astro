@@ -57,7 +57,6 @@ const csrf = Astro.locals.adminSession?.csrfToken ?? '';
     if (response.ok) window.location.reload(); else { error.textContent = '保存失败，请检查输入。'; error.hidden = false; }
   });
 
-  // AI 助手（按严谨度切换 prompt）
   document.querySelectorAll('[data-ai]').forEach((button) => button.addEventListener('click', async () => {
     const task = button.dataset.ai;
     const target = button.dataset.aiTarget;
