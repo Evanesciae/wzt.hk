@@ -1,0 +1,22 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import PageHeader from '../../../components/PageHeader.astro';
+import KbCard from '../../../components/KbCard.astro';
+import { kbCategories } from '../../../lib/content';
+import { listKbNotes } from '../../../server/database';
+
+const categorySlug = Astro.params.category;
+const category = kbCategories.find((item) => item.slug === categorySlug);
+if (!category) return Astro.redirect('/404');
+const notes = listKbNotes().filter((note) => note.category === category.slug);
+---
+
+<BaseLayout title={`${category.title} · 知识库`} description={category.description}>
+  <div class="container page-shell">
+    <a class="back-link" href="/kb/">← 返回知识库</a>
+    <PageHeader eyebrow="CATEGORY" title={category.title} description={category.description} count={notes.length} />
+    <div class="card-grid">
+      {notes.map((note) => <KbCard note={note} />)}
+    </div>
+  </div>
+</BaseLayout>

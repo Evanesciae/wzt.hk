@@ -1,0 +1,59 @@
+---
+import { getCollection } from 'astro:content';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PageHeader from '../components/PageHeader.astro';
+
+const links = (await getCollection('links')).sort((a, b) => a.data.order - b.data.order);
+const categories = ['AI', 'Dev', 'Study', 'Travel', 'Storage', 'Finance', 'Tools'];
+---
+
+<BaseLayout title="常用链接" description="常用工具、资料与服务入口。">
+  <div class="container page-shell">
+    <PageHeader eyebrow="DIRECTORY" title="常用链接" description="常用工具、资料与服务，收在一个不绕路的入口。" count={links.length} />
+
+    <div class="filter-tabs link-filters" aria-label="按分类筛选">
+      <button class="filter-button is-active" type="button" data-link-filter="all">全部</button>
+      {categories.map((category) => <button class="filter-button" type="button" data-link-filter={category}>{category}</button>)}
+    </div>
+
+    <div class="links-grid" data-links-list>
+      {links.map((link) => {
+        const hostname = new URL(link.data.url).hostname || '本地地址';
+        return (
+          <a class="link-card filter-item" href={link.data.url} target="_blank" rel="noreferrer" data-category={link.data.category}>
+            <div class="link-card-top">
+              <span class="link-favicon" aria-hidden="true">{link.data.title.slice(0, 1).toUpperCase()}</span>
+              <span class="external-arrow">↗</span>
+            </div>
+            <h2>{link.data.title}</h2>
+            <p>{link.data.description}</p>
+            <div class="link-meta">
+              <span>{link.data.category}</span>
+              <span class="hostname">{hostname}</span>
+              {link.data.private && <span class="private-badge">私人</span>}
+            </div>
+          </a>
+        );
+      })}
+    </div>
+    <p class="filter-empty" data-filter-empty hidden>这个分类还没有链接。</p>
+    <p class="privacy-note">“私人”只是用途标记，不代表链接受身份验证保护。请勿在公开构建中写入密码或密钥。</p>
+  </div>
+</BaseLayout>
+
+<script>
+  const buttons = document.querySelectorAll<HTMLButtonElement>('[data-link-filter]');
+  const items = document.querySelectorAll<HTMLElement>('[data-links-list] .filter-item');
+  const empty = document.querySelector<HTMLElement>('[data-filter-empty]');
+  buttons.forEach((button) => button.addEventListener('click', () => {
+    const category = button.dataset.linkFilter;
+    let visible = 0;
+    buttons.forEach((item) => item.classList.toggle('is-active', item === button));
+    items.forEach((item) => {
+      item.hidden = category !== 'all' && item.dataset.category !== category;
+      if (!item.hidden) visible += 1;
+    });
+    if (empty) empty.hidden = visible !== 0;
+  }));
+</script>
+

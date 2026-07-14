@@ -1,0 +1,552 @@
+---
+import 'maplibre-gl/dist/maplibre-gl.css';
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import { getTrip } from '../../../server/database';
+
+const slug = Astro.params.slug;
+const trip = slug ? getTrip(slug, true) : undefined;
+if (!trip) return Astro.redirect('/404');
+const csrf = Astro.locals.adminSession?.csrfToken ?? '';
+const typeLabels = { place: '地点', transit: '交通', meal: '餐饮', stay: '住宿', note: '事件' } as const;
+const firstLocation = trip.days.flatMap((day) => day.events).find((event) => event.location)?.location;
+const geoDefault = firstLocation ? [firstLocation.lng, firstLocation.lat] : [114.17, 22.32];
+const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination, status: trip.status, startDate: trip.startDate, endDate: trip.endDate, summary: trip.summary, body: trip.body, pendingItems: trip.pendingItems, draft: trip.draft, featured: trip.featured };
+---
+
+<BaseLayout title={`编辑 ${trip.title}`}>
+  <meta name="csrf-token" content={csrf} slot="head" />
+  <div class="container admin-editor" data-trip-id={trip.id} data-trip={JSON.stringify(tripMeta)}>
+    <header class="admin-editor-header">
+      <div><a href="/admin/" class="back-link">← 管理中心</a><p class="eyebrow">TRAVEL EDITOR</p><h1>{trip.title}</h1><p>{trip.destination}</p></div>
+      <div class="admin-editor-actions">
+        <button type="button" class="text-button" data-edit-trip>编辑信息</button>
+        <a class="primary-button" href={`/travel/${trip.id}/`} target="_blank">查看公开页面 ↗</a>
+      </div>
+    </header>
+
+    <div class="admin-notice">所有修改会立即写入服务器数据库。上传原图后，网页版本将在服务器生成。</div>
+
+    <div class="admin-days" data-day-list>
+      <button class="timeline-insert" type="button" data-add-day><span>＋</span><em>添加日期</em></button>
+      {trip.days.map((day, dayIndex) => (
+        <section class="admin-day" data-day-id={day.id} data-day={JSON.stringify({ id: day.id, date: day.date, city: day.city, title: day.title, summary: day.summary })}>
+          <header class="admin-day-header" draggable="true" data-day-drag={day.id}><span class="admin-day-number">{String(dayIndex + 1).padStart(2, '0')}</span><div><time>{day.date}</time><h2>{day.title ?? day.city}</h2><p>{day.city}</p></div><div class="admin-day-actions"><button type="button" class="text-button" data-edit-day>编辑</button><button type="button" class="text-button" data-delete-day>删除</button></div></header>
+          <button class="timeline-insert" type="button" data-add-event data-day-id={day.id} data-after="__start__"><span>＋</span><em>添加模块</em></button>
+          <div class="admin-event-list">
+            {day.events.map((event) => (
+              <div class="admin-event-wrap">
+                <article class="admin-event" data-event={JSON.stringify(event)} data-photo-dropzone>
+                  <div class="admin-event-order">{event.sortOrder + 1}</div>
+                  <div class="admin-event-content">
+                    <span class="admin-event-type">{typeLabels[event.type]}</span><h3>{event.title}</h3>
+                    {event.note && <p>{event.note}</p>}
+                    <div class="admin-event-meta"><span>{event.photos.length} 张照片</span>{event.location && <span>{event.location.lat.toFixed(4)}, {event.location.lng.toFixed(4)}</span>}</div>
+                    {event.photos.length > 0 && <div class="admin-photo-strip" data-photo-strip>{event.photos.map((photo) => {
+                      const thumb = [...photo.variants].sort((a, b) => a.width - b.width)[0];
+                      return thumb && <span class="admin-photo-item" draggable="true" data-photo-id={photo.id}><img src={`/media/${thumb.path}`} alt={photo.alt} loading="lazy" /><button type="button" class="admin-photo-delete" data-delete-photo={photo.id} title="删除照片">×</button></span>;
+                    })}</div>}
+                  </div>
+                  <div class="admin-event-actions">
+                    <button type="button" data-upload-trigger title="添加照片">＋ 照片</button>
+                    <button type="button" data-edit-event>编辑</button>
+                    <button type="button" data-delete-event>删除</button>
+                    <input type="file" accept="image/jpeg,image/png,image/webp,image/tiff,image/heic,image/heif,.heic,.heif" multiple data-photo-input hidden />
+                  </div>
+                  <div class="upload-status" data-upload-status hidden>
+                    <div><span data-upload-text></span><strong data-upload-percent>0%</strong></div>
+                    <div class="upload-progress-track"><i data-upload-progress></i></div>
+                  </div>
+                  <div class="photo-drop-overlay" aria-hidden="true"><span>＋</span><strong>拖到这里添加照片</strong><small>支持多张原图</small></div>
+                </article>
+                <button class="timeline-insert" type="button" data-add-event data-day-id={day.id} data-after={event.id}><span>＋</span><em>在这里添加</em></button>
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  </div>
+
+  <dialog class="event-editor-dialog" data-event-dialog>
+    <form method="dialog" data-event-form>
+      <header><div><p class="eyebrow">TIMELINE MODULE</p><h2 data-dialog-title>添加模块</h2></div><button type="button" data-dialog-close>×</button></header>
+      <input type="hidden" name="eventId" /><input type="hidden" name="dayId" /><input type="hidden" name="afterEventId" />
+      <fieldset class="event-type-picker"><legend>类型</legend>{Object.entries(typeLabels).map(([value, label]) => (
+        <label><input type="radio" name="type" value={value} required /><span>{label}</span></label>
+      ))}</fieldset>
+      <div class="form-grid">
+        <label class="full">标题<input name="title" required maxlength="120" /></label>
+        <label>时间（可选）<input name="time" type="time" /></label>
+        <label>地址（可选）<input name="address" /></label>
+        <label>纬度<input name="lat" type="number" step="any" /></label>
+        <label>经度<input name="lng" type="number" step="any" /></label>
+        <div class="full geo-picker">
+          <label class="geo-search-label">地图选点（搜索或拖动图钉）<input name="geoSearch" data-geo-search placeholder="搜索地点/地址，回车查询" autocomplete="off" /></label>
+          <ul class="geo-results" data-geo-results hidden></ul>
+          <div class="geo-map" data-geo-map data-geo-default={JSON.stringify(geoDefault)}></div>
+        </div>
+        <div class="type-fields full" data-fields="place">
+          <label>分类（可选）<input name="category" /></label>
+        </div>
+        <div class="type-fields full" data-fields="transit">
+          <label>出发地<input name="from" /></label><label>目的地<input name="to" /></label>
+          <label>方式<select name="method"><option value="">未指定</option><option value="flight">飞机</option><option value="train">火车</option><option value="metro">地铁</option><option value="bus">巴士</option><option value="ferry">渡轮</option><option value="car">驾车</option><option value="walk">步行</option></select></label>
+          <label>班次/车次（可选）<input name="number" /></label>
+          <label>终点纬度（可选）<input name="endLat" type="number" step="any" /></label>
+          <label>终点经度（可选）<input name="endLng" type="number" step="any" /></label>
+          <label>终点地址（可选）<input name="endAddress" /></label>
+        </div>
+        <div class="type-fields full" data-fields="meal">
+          <label>餐别<select name="mealType"><option value="">未指定</option><option value="breakfast">早餐</option><option value="lunch">午餐</option><option value="dinner">晚餐</option><option value="cafe">咖啡</option><option value="snack">小吃</option></select></label>
+          <label>菜品（用逗号分隔）<input name="dishes" /></label><label>费用<input name="cost" /></label>
+          <label>评分（0-5）<input name="rating" type="number" step="0.5" min="0" max="5" /></label>
+        </div>
+        <div class="type-fields full" data-fields="stay"><label>预订链接<input name="booking" type="url" /></label></div>
+        <label class="full">备注<textarea name="note" rows="4"></textarea>
+          <div class="ai-assist"><span>AI</span><button type="button" data-ai="polish" data-ai-target="note">润色</button><button type="button" data-ai="expand" data-ai-target="note">扩写</button></div>
+        </label>
+      </div>
+      <p class="form-error" data-event-error hidden></p>
+      <footer><button type="button" class="text-button" data-dialog-close>取消</button><button type="submit" class="primary-button">保存</button></footer>
+    </form>
+  </dialog>
+
+  <dialog class="event-editor-dialog" data-trip-dialog>
+    <form method="dialog" data-trip-form>
+      <header><div><p class="eyebrow">TRIP DETAILS</p><h2>编辑行程信息</h2></div><button type="button" data-dialog-close>×</button></header>
+      <div class="form-grid">
+        <label class="full">标题<input name="title" required maxlength="120" /></label>
+        <label>目的地<input name="destination" required /></label>
+        <label>状态<select name="status"><option value="planning">计划中</option><option value="upcoming">即将出发</option><option value="archived">已归档</option></select></label>
+        <label>开始日期<input name="startDate" type="date" required /></label>
+        <label>结束日期<input name="endDate" type="date" required /></label>
+        <label class="full">摘要<input name="summary" required /></label>
+        <label class="full">整体信息（Markdown）<textarea name="body" rows="8"></textarea>
+          <div class="ai-assist"><span>AI</span><button type="button" data-ai="polish" data-ai-target="body">润色</button><button type="button" data-ai="expand" data-ai-target="body">扩写</button><button type="button" data-ai="title-summary" data-ai-target="body">生成标题摘要</button></div>
+        </label>
+        <label class="full">出发前待确认（一行一条）<textarea name="pendingItems" rows="4"></textarea></label>
+        <label class="full form-checks">
+          <label><input name="draft" type="checkbox" /><span>草稿（不公开）</span></label>
+          <label><input name="featured" type="checkbox" /><span>精选</span></label>
+        </label>
+      </div>
+      <p class="form-error" data-trip-error hidden></p>
+      <footer><button type="button" class="text-button" data-dialog-close>取消</button><button type="submit" class="primary-button">保存</button></footer>
+    </form>
+  </dialog>
+
+  <dialog class="event-editor-dialog" data-day-dialog>
+    <form method="dialog" data-day-form>
+      <header><div><p class="eyebrow">TRAVEL DAY</p><h2 data-day-dialog-title>添加日期</h2></div><button type="button" data-dialog-close>×</button></header>
+      <input type="hidden" name="dayId" />
+      <div class="form-grid">
+        <label>日期<input name="date" type="date" required /></label>
+        <label>城市<input name="city" required /></label>
+        <label class="full">标题（可选，默认用城市）<input name="title" /></label>
+        <label class="full">摘要（可选）<textarea name="summary" rows="3"></textarea></label>
+      </div>
+      <p class="form-error" data-day-error hidden></p>
+      <footer><button type="button" class="text-button" data-dialog-close>取消</button><button type="submit" class="primary-button">保存</button></footer>
+    </form>
+  </dialog>
+</BaseLayout>
+
+<script>
+  // @ts-nocheck -- DOM types are validated through browser integration tests.
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '';
+  const dialog = document.querySelector('[data-event-dialog]');
+  const form = dialog?.querySelector('[data-event-form]');
+  const title = dialog?.querySelector('[data-dialog-title]');
+  const error = dialog?.querySelector('[data-event-error]');
+  const api = async (url, options = {}) => fetch(url, { ...options, headers: { ...(options.headers || {}), 'x-csrf-token': csrf } });
+
+  function setType(type) {
+    dialog?.querySelectorAll('[data-fields]').forEach((fields) => fields.hidden = fields.dataset.fields !== type);
+  }
+  dialog?.querySelectorAll('input[name="type"]').forEach((input) => input.addEventListener('change', () => setType(input.value)));
+  document.querySelectorAll('[data-dialog-close]').forEach((button) => button.addEventListener('click', () => button.closest('dialog')?.close()));
+
+  document.querySelectorAll('[data-add-event]').forEach((button) => button.addEventListener('click', () => {
+    form.reset(); form.elements.eventId.value = ''; form.elements.dayId.value = button.dataset.dayId;
+    form.elements.afterEventId.value = button.dataset.after; title.textContent = '添加模块'; setType(''); dialog.showModal(); geoOpen();
+  }));
+
+  document.querySelectorAll('[data-edit-event]').forEach((button) => button.addEventListener('click', () => {
+    const event = JSON.parse(button.closest('[data-event]').dataset.event);
+    form.reset(); title.textContent = '编辑模块'; form.elements.eventId.value = event.id;
+    form.elements.dayId.value = event.dayId; form.elements.type.value = event.type; form.elements.title.value = event.title;
+    for (const key of ['time','note']) form.elements[key].value = event[key] ?? '';
+    for (const key of ['address','lat','lng']) form.elements[key].value = key === 'address' ? event.location?.address ?? '' : event.location?.[key] ?? '';
+    for (const key of ['from','to','method','number','mealType','cost','rating','booking','category']) form.elements[key].value = event.data?.[key] ?? '';
+    for (const key of ['endAddress']) form.elements[key].value = event.data?.endLocation?.[key] ?? '';
+    form.elements.endLat.value = event.data?.endLocation?.lat ?? '';
+    form.elements.endLng.value = event.data?.endLocation?.lng ?? '';
+    form.elements.dishes.value = event.data?.dishes?.join(', ') ?? ''; setType(event.type); dialog.showModal(); geoOpen();
+  }));
+
+  form?.addEventListener('submit', async (submitEvent) => {
+    submitEvent.preventDefault(); error.hidden = true;
+    const data = new FormData(form); const type = data.get('type');
+    const extra = {};
+    for (const key of ['from','to','method','number','mealType','cost','booking','category']) if (data.get(key)) extra[key] = data.get(key);
+    if (data.get('dishes')) extra.dishes = String(data.get('dishes')).split(/[,，]/).map((item) => item.trim()).filter(Boolean);
+    if (data.get('rating')) extra.rating = Number(data.get('rating'));
+    const endLat = data.get('endLat'), endLng = data.get('endLng');
+    if (endLat !== '' && endLat != null && endLng !== '' && endLng != null) {
+      extra.endLocation = { lat: Number(endLat), lng: Number(endLng) };
+      if (data.get('endAddress')) extra.endLocation.address = String(data.get('endAddress'));
+    }
+    const body = { dayId: data.get('dayId'), afterEventId: data.get('afterEventId'), type, title: data.get('title'), time: data.get('time'), note: data.get('note'), address: data.get('address'), lat: data.get('lat'), lng: data.get('lng'), data: extra };
+    const eventId = data.get('eventId');
+    const response = await api(eventId ? `/api/admin/events/${eventId}` : '/api/admin/events', {
+      method: eventId ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+    if (response.ok) window.location.reload(); else { error.textContent = '保存失败，请检查输入。'; error.hidden = false; }
+  });
+
+  // 地图选点：Nominatim 地址搜索 + 可拖动图钉，回填 lat/lng/address
+  const geoMapEl = dialog?.querySelector('[data-geo-map]');
+  const geoSearch = dialog?.querySelector('[data-geo-search]');
+  const geoResults = dialog?.querySelector('[data-geo-results]');
+  const latInput = form?.elements.namedItem('lat');
+  const lngInput = form?.elements.namedItem('lng');
+  const addressInput = form?.elements.namedItem('address');
+  let geoMap = null, geoMarker = null, geoReady = false;
+  async function ensureGeoMap() {
+    if (geoReady || !geoMapEl) return;
+    geoReady = true;
+    const { default: maplibregl } = await import('maplibre-gl');
+    const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const center = JSON.parse(geoMapEl.dataset.geoDefault || '[114.17,22.32]');
+    geoMap = new maplibregl.Map({
+      container: geoMapEl, style: `https://tiles.openfreemap.org/styles/${dark ? 'dark' : 'positron'}`,
+      center, zoom: 11, cooperativeGestures: true,
+    });
+    geoMap.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+    geoMarker = new maplibregl.Marker({ draggable: true });
+    geoMarker.on('dragend', () => {
+      const { lng, lat } = geoMarker.getLngLat();
+      if (latInput) latInput.value = lat.toFixed(6);
+      if (lngInput) lngInput.value = lng.toFixed(6);
+    });
+  }
+  function geoPlaceMarker(lat, lng, fly = true) {
+    if (!geoMap || !geoMarker) return;
+    geoMarker.setLngLat([lng, lat]).addTo(geoMap);
+    if (fly) geoMap.flyTo({ center: [lng, lat], zoom: Math.max(geoMap.getZoom(), 13), duration: 500 });
+  }
+  function geoSyncFromInputs() {
+    if (!geoMap) return;
+    const lat = parseFloat(latInput?.value), lng = parseFloat(lngInput?.value);
+    if (Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0)) geoPlaceMarker(lat, lng, false);
+    else geoMarker?.remove();
+  }
+  async function geoOpen() {
+    await ensureGeoMap();
+    if (!geoMap) return;
+    requestAnimationFrame(() => { geoMap.resize(); geoSyncFromInputs(); });
+  }
+  async function geoRunSearch(query) {
+    if (!query.trim() || !geoResults) return;
+    geoResults.innerHTML = '<li><button type="button" disabled>查询中…</button></li>';
+    geoResults.hidden = false;
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=5&accept-language=zh&q=${encodeURIComponent(query)}`);
+      const items = await res.json();
+      if (!items.length) { geoResults.innerHTML = '<li><button type="button" disabled>无结果，可手动填坐标或拖动图钉</button></li>'; return; }
+      geoResults.innerHTML = '';
+      items.forEach((item) => {
+        const li = document.createElement('li');
+        const btn = document.createElement('button');
+        btn.type = 'button'; btn.textContent = item.display_name;
+        btn.addEventListener('click', () => {
+          const lat = parseFloat(item.lat), lng = parseFloat(item.lon);
+          if (latInput) latInput.value = lat.toFixed(6);
+          if (lngInput) lngInput.value = lng.toFixed(6);
+          if (addressInput && !addressInput.value) addressInput.value = String(item.display_name).split(',').slice(0, 3).join(',');
+          geoPlaceMarker(lat, lng); geoResults.hidden = true;
+        });
+        li.appendChild(btn); geoResults.appendChild(li);
+      });
+    } catch (err) {
+      geoResults.innerHTML = '<li><button type="button" disabled>查询失败，可手动填坐标或拖动图钉</button></li>';
+    }
+  }
+  geoSearch?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); geoRunSearch(geoSearch.value); }
+  });
+  geoSearch?.addEventListener('input', () => { if (geoResults && !geoResults.hidden && !geoSearch.value) geoResults.hidden = true; });
+
+  // AI 助手（旅行内容用随手模式，不传 strict）
+  document.querySelectorAll('[data-ai]').forEach((button) => button.addEventListener('click', async () => {
+    const task = button.dataset.ai;
+    const formEl = button.closest('dialog')?.querySelector('form');
+    const target = button.dataset.aiTarget;
+    const text = task === 'title-summary' ? formEl?.elements.namedItem('body')?.value : formEl?.elements.namedItem(target)?.value;
+    if (!text || !text.trim()) { alert('没有可处理的内容，先写点草稿。'); return; }
+    const original = button.textContent; button.disabled = true; button.textContent = '处理中…';
+    try {
+      const res = await api('/api/admin/ai', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ task, text }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { alert(`AI 处理失败：${data.error ?? res.status}`); return; }
+      if (task === 'polish' || task === 'expand') formEl.elements.namedItem(target).value = data.text;
+      else if (task === 'title-summary') {
+        if (data.title) formEl.elements.namedItem('title').value = data.title;
+        if (data.summary) formEl.elements.namedItem('summary').value = data.summary;
+      }
+    } catch (err) { alert(`AI 请求失败：${err instanceof Error ? err.message : '网络错误'}`); }
+    finally { button.disabled = false; button.textContent = original; }
+  }));
+
+  document.querySelectorAll('[data-delete-event]').forEach((button) => button.addEventListener('click', async () => {
+    const event = JSON.parse(button.closest('[data-event]').dataset.event);
+    if (!confirm(`删除“${event.title}”及其照片记录？`)) return;
+    const response = await api(`/api/admin/events/${event.id}`, { method: 'DELETE' });
+    if (response.ok) window.location.reload(); else alert('删除失败。');
+  }));
+
+  // 行程信息编辑
+  const tripDialog = document.querySelector('[data-trip-dialog]');
+  const tripForm = tripDialog?.querySelector('[data-trip-form]');
+  const tripError = tripDialog?.querySelector('[data-trip-error]');
+  document.querySelector('[data-edit-trip]')?.addEventListener('click', () => {
+    const trip = JSON.parse(document.querySelector('.admin-editor').dataset.trip);
+    tripForm.reset();
+    for (const key of ['title','destination','status','startDate','endDate','summary','body']) tripForm.elements[key].value = trip[key] ?? '';
+    tripForm.elements.pendingItems.value = (trip.pendingItems ?? []).join('\n');
+    tripForm.elements.draft.checked = Boolean(trip.draft);
+    tripForm.elements.featured.checked = Boolean(trip.featured);
+    tripError.hidden = true; tripDialog.showModal();
+  });
+  tripForm?.addEventListener('submit', async (submitEvent) => {
+    submitEvent.preventDefault(); tripError.hidden = true;
+    const data = new FormData(tripForm);
+    const body = {
+      title: data.get('title'), destination: data.get('destination'), status: data.get('status'),
+      startDate: data.get('startDate'), endDate: data.get('endDate'), summary: data.get('summary'),
+      body: data.get('body'), pendingItems: String(data.get('pendingItems') ?? '').split('\n').map((item) => item.trim()).filter(Boolean),
+      draft: tripForm.elements.draft.checked, featured: tripForm.elements.featured.checked,
+    };
+    const tripId = document.querySelector('.admin-editor').dataset.tripId;
+    const response = await api(`/api/admin/trips/${tripId}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    if (response.ok) window.location.reload(); else { tripError.textContent = '保存失败，请检查输入。'; tripError.hidden = false; }
+  });
+
+  // 日期(天)增删改
+  const dayDialog = document.querySelector('[data-day-dialog]');
+  const dayForm = dayDialog?.querySelector('[data-day-form]');
+  const dayError = dayDialog?.querySelector('[data-day-error]');
+  const dayDialogTitle = dayDialog?.querySelector('[data-day-dialog-title]');
+  document.querySelector('[data-add-day]')?.addEventListener('click', () => {
+    dayForm.reset(); dayForm.elements.dayId.value = ''; dayDialogTitle.textContent = '添加日期'; dayError.hidden = true; dayDialog.showModal();
+  });
+  document.querySelectorAll('[data-edit-day]').forEach((button) => button.addEventListener('click', () => {
+    const day = JSON.parse(button.closest('[data-day]').dataset.day);
+    dayForm.reset(); dayForm.elements.dayId.value = day.id; dayDialogTitle.textContent = '编辑日期';
+    dayForm.elements.date.value = day.date; dayForm.elements.city.value = day.city;
+    dayForm.elements.title.value = day.title ?? ''; dayForm.elements.summary.value = day.summary ?? '';
+    dayError.hidden = true; dayDialog.showModal();
+  }));
+  dayForm?.addEventListener('submit', async (submitEvent) => {
+    submitEvent.preventDefault(); dayError.hidden = true;
+    const data = new FormData(dayForm);
+    const body = { date: data.get('date'), city: data.get('city'), title: data.get('title'), summary: data.get('summary') };
+    const dayId = data.get('dayId');
+    const tripId = document.querySelector('.admin-editor').dataset.tripId;
+    const response = await api(dayId ? `/api/admin/days/${dayId}` : '/api/admin/days', {
+      method: dayId ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(dayId ? body : { tripId, ...body }),
+    });
+    if (response.ok) window.location.reload(); else { dayError.textContent = '保存失败，请检查输入。'; dayError.hidden = false; }
+  });
+  document.querySelectorAll('[data-delete-day]').forEach((button) => button.addEventListener('click', async () => {
+    const day = JSON.parse(button.closest('[data-day]').dataset.day);
+    if (!confirm(`删除 ${day.date} ${day.city} 及其下所有模块和照片？`)) return;
+    const response = await api(`/api/admin/days/${day.id}`, { method: 'DELETE' });
+    if (response.ok) window.location.reload(); else alert('删除失败。');
+  }));
+
+  // 日期拖拽排序
+  const dayList = document.querySelector('[data-day-list]');
+  if (dayList) {
+    let dragDayId = null;
+    let dayStartOrder = null;
+    const dayOrderOf = () => [...dayList.querySelectorAll('[data-day-id]')].map((section) => section.dataset.dayId);
+    dayList.querySelectorAll('[data-day-drag]').forEach((handle) => {
+      handle.addEventListener('dragstart', (event) => {
+        dragDayId = handle.dataset.dayDrag; dayStartOrder = dayOrderOf();
+        handle.classList.add('is-dragging-photo'); event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', dragDayId);
+      });
+      handle.addEventListener('dragover', (event) => {
+        event.preventDefault(); event.dataTransfer.dropEffect = 'move';
+        if (!dragDayId) return;
+        const section = handle.closest('[data-day-id]');
+        const dragging = dayList.querySelector(`[data-day-id="${CSS.escape(dragDayId)}"]`);
+        if (!dragging || dragging === section) return;
+        const rect = handle.getBoundingClientRect();
+        dayList.insertBefore(dragging, event.clientY > rect.top + rect.height / 2 ? section.nextSibling : section);
+      });
+    });
+    dayList.addEventListener('dragend', async () => {
+      dayList.querySelectorAll('.is-dragging-photo').forEach((el) => el.classList.remove('is-dragging-photo'));
+      const newOrder = dayOrderOf();
+      if (!dragDayId || !dayStartOrder || newOrder.join(',') === dayStartOrder.join(',')) { dragDayId = null; dayStartOrder = null; return; }
+      const tripId = document.querySelector('.admin-editor').dataset.tripId; dragDayId = null; dayStartOrder = null;
+      const response = await api(`/api/admin/trips/${tripId}/days/order`, {
+        method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ dayIds: newOrder }),
+      });
+      if (response.ok) window.location.reload(); else alert('排序保存失败，请重试。');
+    });
+  }
+  document.querySelectorAll('[data-delete-photo]').forEach((button) => button.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const photoId = button.dataset.deletePhoto;
+    if (!confirm('确定删除这张照片？此操作不可撤销。')) return;
+    try {
+      const response = await api(`/api/admin/photos/${photoId}`, { method: 'DELETE' });
+      if (response.ok) { window.location.reload(); return; }
+      const body = await response.json().catch(() => ({}));
+      alert(`删除失败（${response.status}）：${body.error ?? '未知错误'}`);
+    } catch (err) {
+      alert(`删除请求失败：${err instanceof Error ? err.message : '网络错误'}`);
+    }
+  }));
+
+  // 拖动排序：无拍摄时间的照片会沉底，用拖拽手动归位；首次拖拽后该模块改为手动排序。
+  const orderOf = (strip) => [...strip.querySelectorAll('[data-photo-id]')].map((item) => item.dataset.photoId);
+  document.querySelectorAll('[data-photo-strip]').forEach((strip) => {
+    let dragId = null;
+    let startOrder = null;
+    strip.querySelectorAll('[data-photo-id]').forEach((item) => {
+      item.addEventListener('dragstart', (event) => {
+        dragId = item.dataset.photoId;
+        startOrder = orderOf(strip);
+        item.classList.add('is-dragging-photo');
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', dragId);
+      });
+      item.addEventListener('dragover', (event) => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+        if (!dragId || item.dataset.photoId === dragId) return;
+        const rect = item.getBoundingClientRect();
+        const after = event.clientX > rect.left + rect.width / 2;
+        const dragging = strip.querySelector(`[data-photo-id="${CSS.escape(dragId)}"]`);
+        strip.insertBefore(dragging, after ? item.nextSibling : item);
+      });
+    });
+    strip.addEventListener('dragend', async () => {
+      strip.querySelectorAll('.is-dragging-photo').forEach((el) => el.classList.remove('is-dragging-photo'));
+      const newOrder = orderOf(strip);
+      if (!dragId || !startOrder || newOrder.join(',') === startOrder.join(',')) { dragId = null; startOrder = null; return; }
+      const eventId = JSON.parse(strip.closest('[data-event]').dataset.event).id;
+      dragId = null; startOrder = null;
+      const response = await api(`/api/admin/events/${eventId}/photos/order`, {
+        method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ photoIds: newOrder }),
+      });
+      if (response.ok) window.location.reload(); else alert('排序保存失败，请重试。');
+    });
+  });
+  async function uploadFiles(card, incomingFiles) {
+    if (!card || card.dataset.uploading === 'true') return;
+    const files = [...incomingFiles].filter((file) => file.type.startsWith('image/') || /\.(jpe?g|png|webp|tiff?|heic|heif)$/i.test(file.name));
+    const status = card.querySelector('[data-upload-status]');
+    const statusText = status.querySelector('[data-upload-text]');
+    const percentText = status.querySelector('[data-upload-percent]');
+    const progressBar = status.querySelector('[data-upload-progress]');
+    const updateProgress = (percent, text) => {
+      const value = Math.max(0, Math.min(100, Math.round(percent)));
+      progressBar.style.width = `${value}%`;
+      percentText.textContent = `${value}%`;
+      statusText.textContent = text;
+    };
+    status.hidden = false;
+    if (files.length === 0) { updateProgress(0, '没有检测到支持的图片文件。'); return; }
+    if (files.length > 30) { updateProgress(0, '每次最多上传 30 张照片。'); return; }
+    const oversized = files.find((file) => file.size > 100 * 1024 * 1024);
+    if (oversized) { updateProgress(0, `${oversized.name} 超过 100 MB。`); return; }
+    const event = JSON.parse(card.dataset.event);
+    card.dataset.uploading = 'true';
+    card.classList.add('is-uploading');
+    updateProgress(0, `准备上传 ${files.length} 张原图…`);
+    const data = new FormData(); files.forEach((file) => data.append('photos', file));
+    const xhr = new XMLHttpRequest();
+    let streamOffset = 0;
+    let streamBuffer = '';
+    let completed = false;
+    const finishWithError = (message) => {
+      updateProgress(Number(percentText.textContent?.replace('%', '')) || 0, message);
+      card.dataset.uploading = 'false';
+      card.classList.remove('is-uploading');
+    };
+    const handleMessage = (message) => {
+      if (message.type === 'progress') {
+        const visual = 35 + Number(message.overall ?? 0) * .65;
+        let label = `正在处理第 ${message.fileIndex}/${message.totalFiles} 张：${message.fileName}`;
+        if (message.stage === 'resizing' && message.width) label += ` · 生成 ${message.width}px`;
+        updateProgress(visual, label);
+      } else if (message.type === 'complete') {
+        completed = true; updateProgress(100, '处理完成，正在刷新…');
+      } else if (message.type === 'error') finishWithError(`处理失败：${message.error ?? '未知错误'}`);
+    };
+    const readStream = () => {
+      streamBuffer += xhr.responseText.slice(streamOffset); streamOffset = xhr.responseText.length;
+      const messages = streamBuffer.split('\n\n'); streamBuffer = messages.pop() ?? '';
+      messages.forEach((block) => {
+        const dataLine = block.split('\n').find((line) => line.startsWith('data: '));
+        if (dataLine) { try { handleMessage(JSON.parse(dataLine.slice(6))); } catch {} }
+      });
+    };
+    xhr.open('POST', `/api/admin/events/${event.id}/photos`);
+    xhr.setRequestHeader('x-csrf-token', csrf);
+    xhr.timeout = 30 * 60 * 1000;
+    xhr.upload.addEventListener('progress', (progressEvent) => {
+      if (!progressEvent.lengthComputable) return;
+      const uploadPercent = progressEvent.loaded / progressEvent.total * 35;
+      const megabytes = (progressEvent.loaded / 1024 / 1024).toFixed(1);
+      updateProgress(uploadPercent, `正在上传原图… ${megabytes} MB`);
+    });
+    xhr.upload.addEventListener('load', () => updateProgress(35, '上传完成，等待服务器处理…'));
+    xhr.addEventListener('progress', readStream);
+    xhr.addEventListener('load', () => {
+      readStream();
+      if (completed) setTimeout(() => window.location.reload(), 250);
+      else if (xhr.status >= 400) {
+        try { finishWithError(`上传失败：${JSON.parse(xhr.responseText).error ?? xhr.status}`); }
+        catch { finishWithError(`上传失败：HTTP ${xhr.status}`); }
+      } else if (card.dataset.uploading === 'true') finishWithError('处理连接意外结束，请重试。');
+    });
+    xhr.addEventListener('error', () => finishWithError('网络连接中断，服务器未完成处理。'));
+    xhr.addEventListener('timeout', () => finishWithError('处理超过 30 分钟，已停止等待。'));
+    xhr.send(data);
+  }
+
+  document.querySelectorAll('[data-upload-trigger]').forEach((button) => button.addEventListener('click', () => button.closest('[data-event]')?.querySelector('[data-photo-input]')?.click()));
+  document.querySelectorAll('[data-photo-input]').forEach((input) => input.addEventListener('change', () => {
+    if (input.files?.length) uploadFiles(input.closest('[data-event]'), input.files);
+  }));
+
+  document.querySelectorAll('[data-photo-dropzone]').forEach((card) => {
+    let dragDepth = 0;
+    const hasFiles = (event) => event.dataTransfer?.types?.includes('Files');
+    card.addEventListener('dragenter', (event) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault(); dragDepth += 1; card.classList.add('is-dragging');
+    });
+    card.addEventListener('dragover', (event) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault(); event.dataTransfer.dropEffect = 'copy';
+    });
+    card.addEventListener('dragleave', (event) => {
+      if (!hasFiles(event)) return;
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) card.classList.remove('is-dragging');
+    });
+    card.addEventListener('drop', (event) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault(); dragDepth = 0; card.classList.remove('is-dragging');
+      if (event.dataTransfer?.files?.length) uploadFiles(card, event.dataTransfer.files);
+    });
+  });
+</script>

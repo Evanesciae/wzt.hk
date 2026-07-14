@@ -1,0 +1,28 @@
+# 自动部署到服务器。默认手动触发（在 GitHub 仓库 Actions 页点 Run workflow）。
+# 想改成 push 即部署：把下面 on 改成
+#   on:
+#     push:
+#       branches: [main]
+#     workflow_dispatch:
+#
+# 需要先在仓库 Settings → Secrets and variables → Actions 配置：
+#   SERVER_HOST      服务器 IP 或域名
+#   SERVER_USER      SSH 用户（需有 docker 权限）
+#   SSH_PRIVATE_KEY  能登录服务器的 SSH 私钥（完整内容）
+#   SERVER_PATH      服务器上项目路径，例如 /home/wzt/wzt.hk
+name: deploy
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH 登录服务器并部署
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: cd ${{ secrets.SERVER_PATH }} && ./scripts/deploy.sh

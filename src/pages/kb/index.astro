@@ -1,0 +1,61 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PageHeader from '../../components/PageHeader.astro';
+import KbCard from '../../components/KbCard.astro';
+import { kbCategories } from '../../lib/content';
+import { listKbNotes } from '../../server/database';
+
+const notes = listKbNotes();
+---
+
+<BaseLayout title="知识库" description="私人笔记、方法与参考资料。">
+  <div class="container page-shell">
+    <PageHeader eyebrow="KNOWLEDGE BASE" title="知识库" description="私人笔记、方法与值得再次翻阅的内容。" count={notes.length} />
+
+    <div class="filter-bar" data-filter-root>
+      <label class="search-field">
+        <span aria-hidden="true">⌕</span>
+        <input type="search" placeholder="过滤标题、摘要或标签…" aria-label="过滤知识库" data-search-input />
+      </label>
+      <div class="filter-tabs" aria-label="按分类筛选">
+        <button class="filter-button is-active" type="button" data-filter="all">全部</button>
+        {kbCategories.map((category) => (
+          <button class="filter-button" type="button" data-filter={category.slug}>{category.title}</button>
+        ))}
+      </div>
+    </div>
+
+    <div class="card-grid" data-filter-list>
+      {notes.map((note) => <KbCard note={note} />)}
+    </div>
+    <p class="filter-empty" data-filter-empty hidden>没有找到匹配的笔记。</p>
+  </div>
+</BaseLayout>
+
+<script>
+  const root = document.querySelector<HTMLElement>('[data-filter-root]');
+  const input = root?.querySelector<HTMLInputElement>('[data-search-input]');
+  const buttons = root?.querySelectorAll<HTMLButtonElement>('[data-filter]');
+  const items = document.querySelectorAll<HTMLElement>('[data-filter-list] .filter-item');
+  const empty = document.querySelector<HTMLElement>('[data-filter-empty]');
+  let category = 'all';
+
+  function applyFilter() {
+    const query = input?.value.trim().toLowerCase() ?? '';
+    let visible = 0;
+    items.forEach((item) => {
+      const categoryMatch = category === 'all' || item.dataset.category === category;
+      const searchMatch = !query || item.dataset.search?.includes(query);
+      item.hidden = !(categoryMatch && searchMatch);
+      if (!item.hidden) visible += 1;
+    });
+    if (empty) empty.hidden = visible !== 0;
+  }
+
+  input?.addEventListener('input', applyFilter);
+  buttons?.forEach((button) => button.addEventListener('click', () => {
+    category = button.dataset.filter ?? 'all';
+    buttons.forEach((item) => item.classList.toggle('is-active', item === button));
+    applyFilter();
+  }));
+</script>

@@ -1,0 +1,35 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      DB_PATH: /data/wzt.db
+      MEDIA_DIR: /data/media
+      HOST: 0.0.0.0
+      PORT: 4321
+    volumes:
+      - wzt_data:/data
+      - ./backups:/backups
+    expose:
+      - "4321"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  wzt_data:
+  caddy_data:
+  caddy_config:
+

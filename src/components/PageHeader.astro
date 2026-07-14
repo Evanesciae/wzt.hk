@@ -1,0 +1,20 @@
+---
+interface Props {
+  eyebrow?: string;
+  title: string;
+  description: string;
+  count?: number;
+}
+
+const { eyebrow, title, description, count } = Astro.props;
+---
+
+<header class="page-header">
+  {eyebrow && <p class="eyebrow">{eyebrow}</p>}
+  <div class="page-title-line">
+    <h1>{title}</h1>
+    {typeof count === 'number' && <span class="count-badge">{count}</span>}
+  </div>
+  <p class="page-description">{description}</p>
+</header>
+

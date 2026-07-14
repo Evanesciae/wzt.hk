@@ -1,0 +1,79 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import { getKbNote } from '../../../server/database';
+import { kbCategories } from '../../../lib/content';
+
+const slug = Astro.params.slug;
+const note = slug ? getKbNote(slug, true) : undefined;
+if (!note) return Astro.redirect('/404');
+const csrf = Astro.locals.adminSession?.csrfToken ?? '';
+---
+
+<BaseLayout title={`编辑 ${note.title}`}>
+  <meta name="csrf-token" content={csrf} slot="head" />
+  <div class="container admin-editor" data-note-id={note.id}>
+    <header class="admin-editor-header">
+      <div><a href="/admin/kb" class="back-link">← 知识库</a><p class="eyebrow">NOTE EDITOR</p><h1>{note.title}</h1><p>{note.updatedAt}</p></div>
+      <a class="primary-button" href={`/kb/${note.id}/`} target="_blank">查看公开页面 ↗</a>
+    </header>
+
+    <form data-note-form>
+      <div class="form-grid">
+        <label class="full">标题<input name="title" required maxlength="120" value={note.title} /></label>
+        <label class="full">摘要<input name="summary" required value={note.summary} /></label>
+        <label>分类<select name="category">{kbCategories.map((c) => <option value={c.slug} selected={c.slug === note.category}>{c.title}</option>)}</select></label>
+        <label>标签（逗号分隔）<input name="tags" value={note.tags.join(', ')} /></label>
+        <label class="full form-checks">
+          <label><input name="strict" type="checkbox" checked={note.strict} /><span>严谨模式（AI 只整理不臆造）</span></label>
+          <label><input name="draft" type="checkbox" checked={note.draft} /><span>草稿（不公开）</span></label>
+        </label>
+        <label class="full">正文（Markdown）<textarea name="body" rows="16">{note.body}</textarea>
+          <div class="ai-assist"><span>AI</span><button type="button" data-ai="polish" data-ai-target="body">润色</button><button type="button" data-ai="expand" data-ai-target="body">扩写</button><button type="button" data-ai="title-summary" data-ai-target="body">生成标题摘要</button></div>
+        </label>
+      </div>
+      <p class="form-error" data-note-error hidden></p>
+      <div class="admin-editor-actions"><button type="submit" class="primary-button">保存</button></div>
+    </form>
+  </div>
+</BaseLayout>
+
+<script>
+  // @ts-nocheck
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '';
+  const api = async (url, options = {}) => fetch(url, { ...options, headers: { ...(options.headers || {}), 'x-csrf-token': csrf } });
+  const form = document.querySelector('[data-note-form]');
+  const error = document.querySelector('[data-note-error]');
+  const noteId = document.querySelector('.admin-editor').dataset.noteId;
+
+  form?.addEventListener('submit', async (submitEvent) => {
+    submitEvent.preventDefault(); error.hidden = true;
+    const data = new FormData(form);
+    const body = {
+      title: data.get('title'), summary: data.get('summary'), category: data.get('category'),
+      tags: String(data.get('tags') ?? '').split(/[,，]/).map((item) => item.trim()).filter(Boolean),
+      body: data.get('body'), strict: form.elements.strict.checked, draft: form.elements.draft.checked,
+    };
+    const response = await api(`/api/admin/kb/${noteId}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    if (response.ok) window.location.reload(); else { error.textContent = '保存失败，请检查输入。'; error.hidden = false; }
+  });
+
+  // AI 助手（按严谨度切换 prompt）
+  document.querySelectorAll('[data-ai]').forEach((button) => button.addEventListener('click', async () => {
+    const task = button.dataset.ai;
+    const target = button.dataset.aiTarget;
+    const text = task === 'title-summary' ? form.elements.body.value : form.elements[target]?.value;
+    if (!text || !text.trim()) { alert('没有可处理的内容，先写点草稿。'); return; }
+    const original = button.textContent; button.disabled = true; button.textContent = '处理中…';
+    try {
+      const res = await api('/api/admin/ai', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ task, text, strict: form.elements.strict.checked }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { alert(`AI 处理失败：${data.error ?? res.status}`); return; }
+      if (task === 'polish' || task === 'expand') form.elements[target].value = data.text;
+      else if (task === 'title-summary') {
+        if (data.title) form.elements.title.value = data.title;
+        if (data.summary) form.elements.summary.value = data.summary;
+      }
+    } catch (err) { alert(`AI 请求失败：${err instanceof Error ? err.message : '网络错误'}`); }
+    finally { button.disabled = false; button.textContent = original; }
+  }));
+</script>

@@ -1,0 +1,147 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+const csrf = Astro.locals.adminSession?.csrfToken ?? '';
+---
+
+<BaseLayout title="AI 生成行程">
+  <meta name="csrf-token" content={csrf} slot="head" />
+  <div class="container admin-editor">
+    <header class="admin-editor-header">
+      <div><a href="/admin/" class="back-link">← 管理中心</a><p class="eyebrow">AI TRIP GENERATOR</p><h1>AI 生成行程</h1><p>贴一段提纲，AI 生成结构化行程，预览后一键创建</p></div>
+    </header>
+
+    <form data-gen-form class="gen-form">
+      <div class="form-grid">
+        <label>目的地<input name="destination" required /></label>
+        <label>网址标识（可空，默认从标题生成）<input name="slug" placeholder="例如 osaka-2025" /></label>
+        <label>开始日期<input name="startDate" type="date" required /></label>
+        <label>结束日期<input name="endDate" type="date" required /></label>
+        <label class="full">旅行提纲（随便写：每天去哪、做什么、交通…）<textarea name="outline" rows="8" required placeholder="Day1 台北：总统府、中正纪念堂、晚上西门町&#10;Day2 故宫、士林夜市&#10;Day3 101、象山，傍晚高铁去高雄"></textarea></label>
+      </div>
+      <p class="form-error" data-gen-status hidden></p>
+      <button type="submit" class="primary-button">生成计划</button>
+    </form>
+
+    <section data-gen-preview hidden>
+      <div class="section-heading"><div><p class="eyebrow">PREVIEW</p><h2>预览与确认</h2></div></div>
+      <div class="gen-meta"></div>
+      <div class="gen-days"></div>
+      <p class="form-error" data-create-status hidden></p>
+      <button type="button" class="primary-button" data-create>确认创建</button>
+    </section>
+  </div>
+</BaseLayout>
+
+<script>
+  // @ts-nocheck
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '';
+  const api = async (url, options = {}) => fetch(url, { ...options, headers: { ...(options.headers || {}), 'x-csrf-token': csrf } });
+  const slugify = (s) => s.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+  const typeLabels = { place: '地点', transit: '交通', meal: '餐饮', stay: '住宿', note: '事件' };
+
+  const form = document.querySelector('[data-gen-form]');
+  const statusEl = document.querySelector('[data-gen-status]');
+  const preview = document.querySelector('[data-gen-preview]');
+  const metaEl = preview?.querySelector('.gen-meta');
+  const daysEl = preview?.querySelector('.gen-days');
+  const createBtn = document.querySelector('[data-create]');
+  const createStatus = document.querySelector('[data-create-status]');
+
+  async function geocode(q) {
+    try {
+      const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&accept-language=zh&q=${encodeURIComponent(q)}`);
+      const items = await r.json();
+      if (items[0]) return { lat: parseFloat(items[0].lat), lng: parseFloat(items[0].lon), address: items[0].display_name };
+    } catch {}
+    return null;
+  }
+
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const data = new FormData(form);
+    const outline = String(data.get('outline') ?? '');
+    if (!outline.trim()) return;
+    statusEl.hidden = false; statusEl.textContent = 'AI 生成中…（可能要十几秒，请稍候）'; statusEl.style.color = '';
+    preview.hidden = true;
+    try {
+      const res = await api('/api/admin/ai', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ task: 'trip-plan', text: outline, destination: data.get('destination'), startDate: data.get('startDate'), endDate: data.get('endDate') }) });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) { statusEl.textContent = `生成失败：${result.error ?? res.status}`; return; }
+      statusEl.hidden = true;
+      renderPreview(result.plan, data);
+      preview.hidden = false;
+    } catch (err) { statusEl.textContent = `请求失败：${err instanceof Error ? err.message : '网络错误'}`; }
+  });
+
+  function renderPreview(plan, formData) {
+    const slug = String(formData.get('slug') || slugify(plan.title || formData.get('destination') || 'trip'));
+    metaEl.innerHTML = `
+      <label class="full">标题<input data-meta="title" value="${escapeAttr(plan.title || '')}" /></label>
+      <label class="full">摘要<input data-meta="summary" value="${escapeAttr(plan.summary || '')}" /></label>
+      <label>网址标识<input data-meta="slug" value="${escapeAttr(slug)}" /></label>`;
+    daysEl.innerHTML = '';
+    (plan.days || []).forEach((day, di) => {
+      const dayWrap = document.createElement('div');
+      dayWrap.className = 'gen-day';
+      dayWrap.innerHTML = `
+        <div class="gen-day-head"><label><input type="checkbox" data-day-include checked /> 第 ${di + 1} 天</label>
+        <input data-day-date value="${escapeAttr(day.date || '')}" placeholder="YYYY-MM-DD" />
+        <input data-day-city value="${escapeAttr(day.city || '')}" placeholder="城市" />
+        <input data-day-title value="${escapeAttr(day.title || '')}" placeholder="当天标题（可空）" /></div>
+        <div class="gen-events"></div>`;
+      const eventsEl = dayWrap.querySelector('.gen-events');
+      (day.events || []).forEach((ev, ei) => {
+        const evWrap = document.createElement('div');
+        evWrap.className = 'gen-event';
+        evWrap.innerHTML = `
+          <label><input type="checkbox" data-ev-include checked /></label>
+          <select data-ev-type>${Object.entries(typeLabels).map(([v, l]) => `<option value="${v}"${ev.type === v ? ' selected' : ''}>${l}</option>`).join('')}</select>
+          <input data-ev-title value="${escapeAttr(ev.title || '')}" placeholder="标题" />
+          <input data-ev-time value="${escapeAttr(ev.time || '')}" placeholder="时间" />
+          <input data-ev-place value="${escapeAttr(ev.placeName || '')}" placeholder="地点名（用于定位）" />
+          <input data-ev-note value="${escapeAttr(ev.note || '')}" placeholder="备注" />`;
+        eventsEl.appendChild(evWrap);
+      });
+      daysEl.appendChild(dayWrap);
+    });
+  }
+
+  function escapeAttr(s) { return String(s).replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+
+  createBtn?.addEventListener('click', async () => {
+    createStatus.hidden = false; createStatus.textContent = '创建中…'; createStatus.style.color = '';
+    createBtn.disabled = true;
+    try {
+      const meta = Object.fromEntries([...metaEl.querySelectorAll('[data-meta]')].map((el) => [el.dataset.meta, el.value]));
+      const tripRes = await api('/api/admin/trips', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: slugify(meta.slug), title: meta.title, destination: form.elements.destination.value, status: 'planning', startDate: form.elements.startDate.value, endDate: form.elements.endDate.value, summary: meta.summary }) });
+      const tripJson = await tripRes.json().catch(() => ({}));
+      if (!tripRes.ok) throw new Error(tripJson.error ?? tripRes.status);
+      const tripId = tripJson.id;
+      const dayEls = [...daysEl.querySelectorAll('.gen-day')];
+      let done = 0;
+      for (const dayEl of dayEls) {
+        if (!dayEl.querySelector('[data-day-include]').checked) continue;
+        const dayRes = await api('/api/admin/days', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tripId, date: dayEl.querySelector('[data-day-date]').value, city: dayEl.querySelector('[data-day-city]').value, title: dayEl.querySelector('[data-day-title]').value || undefined }) });
+        const dayJson = await dayRes.json().catch(() => ({}));
+        if (!dayRes.ok) throw new Error(dayJson.error ?? dayRes.status);
+        const dayId = dayJson.id;
+        const evEls = [...dayEl.querySelectorAll('.gen-event')];
+        for (const evEl of evEls) {
+          if (!evEl.querySelector('[data-ev-include]').checked) continue;
+          const place = evEl.querySelector('[data-ev-place]').value.trim();
+          let loc = {};
+          if (place) { const g = await geocode(place); if (g) loc = { lat: g.lat, lng: g.lng, address: g.address }; }
+          const body = { dayId, type: evEl.querySelector('[data-ev-type]').value, title: evEl.querySelector('[data-ev-title]').value, time: evEl.querySelector('[data-ev-time]').value || undefined, note: evEl.querySelector('[data-ev-note]').value || undefined, data: {} };
+          Object.assign(body, loc);
+          done += 1; createStatus.textContent = `创建中… 已建 ${done} 个模块`;
+          const res = await api('/api/admin/events', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+          if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error ?? res.status); }
+        }
+      }
+      window.location.href = `/admin/travel/${tripId}`;
+    } catch (err) {
+      createStatus.textContent = `创建失败：${err instanceof Error ? err.message : '未知错误'}（已创建的部分需手动处理）`;
+      createBtn.disabled = false;
+    }
+  });
+</script>

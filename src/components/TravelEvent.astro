@@ -1,0 +1,113 @@
+---
+import type { TravelEvent } from '../server/types';
+
+interface Props {
+  event: TravelEvent;
+  order: number;
+}
+
+const { event, order } = Astro.props;
+const typeMeta = {
+  place: { label: '地点', symbol: '○' },
+  transit: { label: '交通', symbol: '→' },
+  meal: { label: '餐饮', symbol: '◇' },
+  stay: { label: '住宿', symbol: '□' },
+  note: { label: '记录', symbol: '—' },
+} as const;
+const methodLabels = {
+  flight: '飞机', train: '火车', metro: '地铁', bus: '巴士', ferry: '渡轮',
+  car: '驾车', walk: '步行', other: '其他',
+} as const;
+const mealLabels = {
+  breakfast: '早餐', lunch: '午餐', dinner: '晚餐', cafe: '咖啡', snack: '小吃', other: '餐饮',
+} as const;
+const preparedPhotos = event.photos.map((photo) => {
+  const variants = [...photo.variants].sort((a, b) => a.width - b.width);
+  return { ...photo, thumb: variants[0], full: variants.at(-1), variants };
+});
+---
+
+<article class:list={['timeline-event', `event-${event.type}`]} id={`event-${event.id}`}>
+  <div class="event-marker" aria-hidden="true">
+    <span>{order}</span>
+  </div>
+  <div class="event-body">
+    <div class="event-kicker">
+      <span>{typeMeta[event.type].symbol} {typeMeta[event.type].label}</span>
+      {event.time && <time>{event.time}</time>}
+    </div>
+    <h3>{event.title}</h3>
+
+    {event.type === 'transit' && (
+      <div class="event-details">
+        {event.data.method && <span>{methodLabels[event.data.method as keyof typeof methodLabels] ?? event.data.method}</span>}
+        {event.data.from && event.data.to && <span>{event.data.from} → {event.data.to}</span>}
+        {event.data.number && <span>{event.data.number}</span>}
+      </div>
+    )}
+    {event.type === 'meal' && (
+      <div class="event-details">
+        {event.data.mealType && <span>{mealLabels[event.data.mealType as keyof typeof mealLabels] ?? event.data.mealType}</span>}
+        {event.data.cost && <span>{event.data.cost}</span>}
+        {typeof event.data.rating === 'number' && <span>{event.data.rating}/5</span>}
+      </div>
+    )}
+    {event.type === 'meal' && (event.data.dishes?.length ?? 0) > 0 && (
+      <p class="dish-list">{event.data.dishes?.join(' · ')}</p>
+    )}
+    {event.location?.address && <p class="event-address">{event.location.address}</p>}
+    {event.note && <p class="event-note">{event.note}</p>}
+    {event.type === 'stay' && event.data.booking && (
+      <a class="text-link" href={event.data.booking} target="_blank" rel="noreferrer">查看预订 ↗</a>
+    )}
+
+    {preparedPhotos.length > 0 && (
+      <div class="event-photo-album" data-event-photo-gallery>
+        <div class="event-photos" aria-label={`${event.title}照片预览`}>
+          {preparedPhotos.slice(0, 4).map((photo, index) => (
+          <button
+            type="button"
+            data-photo-src={photo.full ? `/media/${photo.full.path}` : ''}
+            data-photo-alt={photo.alt}
+            data-photo-caption={photo.caption ?? event.title}
+            aria-label={`查看照片：${photo.alt}`}
+          >
+            {photo.thumb && <img
+              src={`/media/${photo.thumb.path}`}
+              srcset={photo.variants.map((variant) => `/media/${variant.path} ${variant.width}w`).join(', ')}
+              sizes="120px" alt={photo.alt} loading="lazy" decoding="async"
+            />}
+            {index === 3 && preparedPhotos.length > 4 && <span>+{preparedPhotos.length - 4}</span>}
+          </button>
+          ))}
+        </div>
+        <dialog class="photo-dialog" data-photo-dialog>
+          <button type="button" class="dialog-close" data-dialog-close aria-label="关闭照片">×</button>
+          <img data-dialog-image alt="" />
+          <p data-dialog-caption></p>
+        </dialog>
+      </div>
+    )}
+  </div>
+</article>
+
+<script>
+  document.querySelectorAll<HTMLElement>('[data-event-photo-gallery]').forEach((gallery) => {
+    if (gallery.dataset.ready) return;
+    gallery.dataset.ready = 'true';
+    const dialog = gallery.querySelector<HTMLDialogElement>('[data-photo-dialog]');
+    const image = dialog?.querySelector<HTMLImageElement>('[data-dialog-image]');
+    const caption = dialog?.querySelector<HTMLElement>('[data-dialog-caption]');
+    gallery.querySelectorAll<HTMLButtonElement>('[data-photo-src]').forEach((button) => {
+      button.addEventListener('click', () => {
+        if (!dialog || !image) return;
+        image.src = button.dataset.photoSrc ?? '';
+        image.alt = button.dataset.photoAlt ?? '';
+        if (caption) caption.textContent = button.dataset.photoCaption ?? '';
+        dialog.showModal();
+      });
+    });
+    dialog?.querySelector<HTMLButtonElement>('[data-dialog-close]')?.addEventListener('click', () => dialog.close());
+    dialog?.addEventListener('click', (event) => { if (event.target === dialog) dialog.close(); });
+  });
+</script>

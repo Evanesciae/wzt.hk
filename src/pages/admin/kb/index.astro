@@ -1,0 +1,59 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import { listKbNotes } from '../../../server/database';
+import { kbCategories, categoryTitle } from '../../../lib/content';
+
+const notes = listKbNotes(true);
+---
+
+<BaseLayout title="知识库管理">
+  <div class="container page-shell admin-dashboard">
+    <div class="admin-heading"><div><p class="eyebrow">ADMIN</p><h1>知识库</h1></div><div class="admin-heading-actions"><button type="button" class="text-button" data-new-note>新建笔记</button><a class="text-button" href="/admin/">← 管理中心</a></div></div>
+    <section><h2>笔记（{notes.length}）</h2><div class="admin-trip-list">{notes.map((note) => (
+      <div class="admin-trip-row">
+        <a href={`/admin/kb/${note.id}`}><div><strong>{note.title}{note.draft && <em class="draft-tag"> 草稿</em>}</strong><span>{categoryTitle(note.category)} · 更新于 {note.updatedAt}</span></div><span>编辑 →</span></a>
+        <button type="button" class="text-button admin-trip-delete" data-delete-note={note.id} data-note-title={note.title}>删除</button>
+      </div>
+    ))}</div></section>
+  </div>
+
+  <dialog class="event-editor-dialog" data-note-dialog>
+    <form method="dialog" data-note-form>
+      <header><div><p class="eyebrow">NEW NOTE</p><h2>新建笔记</h2></div><button type="button" data-dialog-close>×</button></header>
+      <div class="form-grid">
+        <label class="full">网址标识（英文/数字/连字符）<input name="id" required maxlength="80" placeholder="例如 markdown-tips" /></label>
+        <label class="full">标题<input name="title" required maxlength="120" /></label>
+        <label>分类<select name="category">{kbCategories.map((c) => <option value={c.slug}>{c.title}</option>)}</select></label>
+        <label class="full">摘要<input name="summary" required /></label>
+      </div>
+      <p class="form-error" data-note-error hidden></p>
+      <footer><button type="button" class="text-button" data-dialog-close>取消</button><button type="submit" class="primary-button">创建</button></footer>
+    </form>
+  </dialog>
+</BaseLayout>
+
+<script>
+  // @ts-nocheck
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '';
+  const api = async (url, options = {}) => fetch(url, { ...options, headers: { ...(options.headers || {}), 'x-csrf-token': csrf } });
+  document.querySelectorAll('[data-dialog-close]').forEach((button) => button.addEventListener('click', () => button.closest('dialog')?.close()));
+
+  const dialog = document.querySelector('[data-note-dialog]');
+  const form = dialog?.querySelector('[data-note-form]');
+  const error = dialog?.querySelector('[data-note-error]');
+  document.querySelector('[data-new-note]')?.addEventListener('click', () => { form.reset(); error.hidden = true; dialog.showModal(); });
+  form?.addEventListener('submit', async (submitEvent) => {
+    submitEvent.preventDefault(); error.hidden = true;
+    const data = new FormData(form);
+    const body = { id: data.get('id'), title: data.get('title'), summary: data.get('summary'), category: data.get('category') };
+    const response = await api('/api/admin/kb', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    if (response.ok) { const result = await response.json(); window.location.href = `/admin/kb/${result.id}`; }
+    else { const result = await response.json().catch(() => ({})); error.textContent = `创建失败：${result.error ?? response.status}`; error.hidden = false; }
+  });
+
+  document.querySelectorAll('[data-delete-note]').forEach((button) => button.addEventListener('click', async () => {
+    if (!confirm(`删除“${button.dataset.noteTitle}”？此操作不可撤销。`)) return;
+    const response = await api(`/api/admin/kb/${button.dataset.deleteNote}`, { method: 'DELETE' });
+    if (response.ok) window.location.reload(); else alert('删除失败。');
+  }));
+</script>

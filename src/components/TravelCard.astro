@@ -1,0 +1,25 @@
+---
+import type { TravelTrip } from '../server/types';
+import { formatDateRange, travelStatus } from '../lib/content';
+
+interface Props {
+  entry: TravelTrip;
+}
+
+const { entry } = Astro.props;
+---
+
+<article class="content-card travel-card filter-item" data-status={entry.status}>
+  <a class="card-link" href={`/travel/${entry.id}/`} aria-label={`查看：${entry.title}`}></a>
+  <div class="card-meta">
+    <span class:list={['status', `status-${entry.status}`]}>{travelStatus[entry.status]}</span>
+    <time datetime={entry.startDate}>{formatDateRange(new Date(`${entry.startDate}T00:00:00`), new Date(`${entry.endDate}T00:00:00`))}</time>
+  </div>
+  <h2>{entry.title}</h2>
+  <p class="destination">⌖ {entry.destination}</p>
+  <p>{entry.summary}</p>
+  <div class="card-footer">
+    <span>{entry.pendingItems.length > 0 ? `${entry.pendingItems.length} 项待确认` : '事项已确认'}</span>
+    <span aria-hidden="true">→</span>
+  </div>
+</article>

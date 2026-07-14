@@ -1,0 +1,43 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { getSession } from '../../server/auth';
+
+if (getSession(Astro.cookies)) return Astro.redirect('/admin');
+const next = Astro.url.searchParams.get('next') || '/admin';
+---
+
+<BaseLayout title="管理员登录">
+  <div class="container admin-login-shell">
+    <form class="admin-login-card" data-login-form>
+      <p class="eyebrow">WZT.HK ADMIN</p>
+      <h1>登录管理端</h1>
+      <p>编辑行程、上传照片和管理时间线。</p>
+      <label>用户名<input name="username" autocomplete="username" value="admin" required /></label>
+      <label>密码<input name="password" type="password" autocomplete="current-password" required /></label>
+      <p class="form-error" data-form-error hidden></p>
+      <button class="primary-button" type="submit">登录</button>
+    </form>
+  </div>
+</BaseLayout>
+
+<script is:inline define:vars={{ next }}>
+  const form = document.querySelector('[data-login-form]');
+  const error = document.querySelector('[data-form-error]');
+  form?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const button = form.querySelector('button');
+    button.disabled = true;
+    error.hidden = true;
+    const data = new FormData(form);
+    const response = await fetch('/api/admin/login', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: data.get('username'), password: data.get('password') }),
+    });
+    if (response.ok) window.location.href = next;
+    else {
+      error.textContent = response.status === 429 ? '尝试次数过多，请稍后再试。' : '用户名或密码不正确。';
+      error.hidden = false;
+      button.disabled = false;
+    }
+  });
+</script>

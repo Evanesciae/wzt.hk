@@ -1,0 +1,67 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { listTrips } from '../../server/database';
+
+const trips = listTrips(true);
+---
+
+<BaseLayout title="管理中心">
+  <div class="container page-shell admin-dashboard">
+    <div class="admin-heading"><div><p class="eyebrow">ADMIN</p><h1>管理中心</h1></div><div class="admin-heading-actions"><button type="button" class="text-button" data-new-trip>新建行程</button><a class="text-button" href="/admin/travel/generate">AI 生成行程</a><button type="button" class="text-button" data-logout>退出登录</button></div></div>
+    <section><h2>旅行</h2><div class="admin-trip-list">{trips.map((trip) => (
+      <div class="admin-trip-row">
+        <a href={`/admin/travel/${trip.id}`}><div><strong>{trip.title}</strong><span>{trip.destination}</span></div><span>编辑 →</span></a>
+        <button type="button" class="text-button admin-trip-delete" data-delete-trip={trip.id} data-trip-title={trip.title}>删除</button>
+      </div>
+    ))}</div></section>
+    <section><div class="admin-heading-actions" style="margin-bottom:20px"><a class="text-button" href="/admin/kb">知识库管理 →</a></div></section>
+  </div>
+
+  <dialog class="event-editor-dialog" data-trip-dialog>
+    <form method="dialog" data-trip-form>
+      <header><div><p class="eyebrow">NEW TRIP</p><h2>新建行程</h2></div><button type="button" data-dialog-close>×</button></header>
+      <div class="form-grid">
+        <label class="full">网址标识（英文/数字/连字符，用于 URL）<input name="id" required maxlength="80" placeholder="例如 taiwan-2024" /></label>
+        <label class="full">标题<input name="title" required maxlength="120" /></label>
+        <label>目的地<input name="destination" required /></label>
+        <label>状态<select name="status"><option value="planning">计划中</option><option value="upcoming">即将出发</option><option value="archived">已归档</option></select></label>
+        <label>开始日期<input name="startDate" type="date" required /></label>
+        <label>结束日期<input name="endDate" type="date" required /></label>
+        <label class="full">摘要<input name="summary" required /></label>
+      </div>
+      <p class="form-error" data-trip-error hidden></p>
+      <footer><button type="button" class="text-button" data-dialog-close>取消</button><button type="submit" class="primary-button">创建</button></footer>
+    </form>
+  </dialog>
+</BaseLayout>
+
+<script>
+  // @ts-nocheck
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '';
+  const api = async (url, options = {}) => fetch(url, { ...options, headers: { ...(options.headers || {}), 'x-csrf-token': csrf } });
+  document.querySelectorAll('[data-dialog-close]').forEach((button) => button.addEventListener('click', () => button.closest('dialog')?.close()));
+
+  document.querySelector('[data-logout]')?.addEventListener('click', async () => {
+    await api('/api/admin/logout', { method: 'POST' });
+    window.location.href = '/admin/login';
+  });
+
+  const dialog = document.querySelector('[data-trip-dialog]');
+  const form = dialog?.querySelector('[data-trip-form]');
+  const error = dialog?.querySelector('[data-trip-error]');
+  document.querySelector('[data-new-trip]')?.addEventListener('click', () => { form.reset(); error.hidden = true; dialog.showModal(); });
+  form?.addEventListener('submit', async (submitEvent) => {
+    submitEvent.preventDefault(); error.hidden = true;
+    const data = new FormData(form);
+    const body = { id: data.get('id'), title: data.get('title'), destination: data.get('destination'), status: data.get('status'), startDate: data.get('startDate'), endDate: data.get('endDate'), summary: data.get('summary') };
+    const response = await api('/api/admin/trips', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    if (response.ok) { const result = await response.json(); window.location.href = `/admin/travel/${result.id}`; }
+    else { const result = await response.json().catch(() => ({})); error.textContent = `创建失败：${result.error ?? response.status}`; error.hidden = false; }
+  });
+
+  document.querySelectorAll('[data-delete-trip]').forEach((button) => button.addEventListener('click', async () => {
+    if (!confirm(`删除“${button.dataset.tripTitle}”及其全部日期、模块和照片？此操作不可撤销。`)) return;
+    const response = await api(`/api/admin/trips/${button.dataset.deleteTrip}`, { method: 'DELETE' });
+    if (response.ok) window.location.reload(); else alert('删除失败。');
+  }));
+</script>

@@ -1,0 +1,17 @@
+wzt.hk, www.wzt.hk {
+  encode zstd gzip
+
+  request_body {
+    max_size 100MB
+  }
+
+  reverse_proxy app:4321
+
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    X-Content-Type-Options "nosniff"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    Permissions-Policy "camera=(), microphone=(), geolocation=()"
+  }
+}
+

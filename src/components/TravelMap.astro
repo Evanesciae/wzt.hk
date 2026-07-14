@@ -1,0 +1,127 @@
+---
+import 'maplibre-gl/dist/maplibre-gl.css';
+
+interface MapPoint {
+  lat: number;
+  lng: number;
+  title: string;
+  marker: string;
+}
+
+interface MapDay {
+  id: string;
+  label: string;
+  city: string;
+  points: MapPoint[];
+}
+
+interface Props { days: MapDay[] }
+const { days } = Astro.props;
+const firstMappableDay = days.find((day) => day.points.length > 0) ?? days[0];
+---
+
+<aside class="trip-map" data-trip-map data-days={JSON.stringify(days)}>
+  <div class="trip-map-heading">
+    <div>
+      <p class="eyebrow">DAILY MAP</p>
+      <h2 data-map-title>{firstMappableDay?.label}</h2>
+    </div>
+    <span data-map-city>{firstMappableDay?.city}</span>
+  </div>
+  <div class="map-frame">
+    <div class="map-canvas" data-map-canvas aria-label="每日地点地图"></div>
+    <div class="map-empty" data-map-empty hidden>这一天还没有地点坐标。</div>
+  </div>
+  <p class="map-caption">点位依照时间线顺序连接，不代表实际导航路线。</p>
+</aside>
+
+<script>
+  import type { GeoJSONSource, Marker } from 'maplibre-gl';
+
+  interface MapPoint { lat: number; lng: number; title: string; marker: string }
+  interface MapDay { id: string; label: string; city: string; points: MapPoint[] }
+
+  document.querySelectorAll<HTMLElement>('[data-trip-map]').forEach(async (root) => {
+    if (root.dataset.ready) return;
+    root.dataset.ready = 'true';
+    const days: MapDay[] = JSON.parse(root.dataset.days ?? '[]');
+    const canvas = root.querySelector<HTMLElement>('[data-map-canvas]');
+    const empty = root.querySelector<HTMLElement>('[data-map-empty]');
+    const title = root.querySelector<HTMLElement>('[data-map-title]');
+    const city = root.querySelector<HTMLElement>('[data-map-city]');
+    if (!canvas || days.length === 0) return;
+    const mapCanvas = canvas;
+    const { default: maplibregl } = await import('maplibre-gl');
+
+    const initialDay = days.find((day) => day.points.length > 0) ?? days[0];
+    const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const map = new maplibregl.Map({
+      container: mapCanvas,
+      style: `https://tiles.openfreemap.org/styles/${dark ? 'dark' : 'positron'}`,
+      center: initialDay.points[0] ? [initialDay.points[0].lng, initialDay.points[0].lat] : [121, 24],
+      zoom: 10,
+      cooperativeGestures: true,
+    });
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+    let markers: Marker[] = [];
+    let activeDayId = '';
+
+    function lineData(points: MapPoint[]): GeoJSON.FeatureCollection<GeoJSON.LineString> {
+      return {
+        type: 'FeatureCollection',
+        features: points.length < 2 ? [] : [{
+          type: 'Feature',
+          properties: {},
+          geometry: { type: 'LineString', coordinates: points.map((point) => [point.lng, point.lat]) },
+        }],
+      };
+    }
+
+    function showDay(dayId: string) {
+      const day = days.find((item) => item.id === dayId) ?? days[0];
+      if (!day || day.id === activeDayId) return;
+      activeDayId = day.id;
+      if (title) title.textContent = day.label;
+      if (city) city.textContent = day.city;
+      markers.forEach((marker) => marker.remove());
+      markers = [];
+      if (empty) empty.hidden = day.points.length > 0;
+      mapCanvas.hidden = day.points.length === 0;
+      if (day.points.length === 0) return;
+
+      day.points.forEach((point) => {
+        const element = document.createElement('button');
+        element.className = 'map-number-marker';
+        element.textContent = point.marker;
+        element.type = 'button';
+        element.title = point.title;
+        markers.push(new maplibregl.Marker({ element })
+          .setLngLat([point.lng, point.lat])
+          .setPopup(new maplibregl.Popup({ offset: 18 }).setText(point.title))
+          .addTo(map));
+      });
+
+      const source = map.getSource('day-route') as GeoJSONSource | undefined;
+      if (source) source.setData(lineData(day.points));
+      const bounds = new maplibregl.LngLatBounds();
+      day.points.forEach((point) => bounds.extend([point.lng, point.lat]));
+      if (day.points.length === 1) map.easeTo({ center: bounds.getCenter(), zoom: 13, duration: 550 });
+      else map.fitBounds(bounds, { padding: 58, maxZoom: 13, duration: 650 });
+    }
+
+    map.on('load', () => {
+      map.addSource('day-route', { type: 'geojson', data: lineData([]) });
+      map.addLayer({
+        id: 'day-route',
+        type: 'line',
+        source: 'day-route',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': dark ? '#b8c6c1' : '#4f625d', 'line-width': 2, 'line-opacity': .72, 'line-dasharray': [2, 2] },
+      });
+      activeDayId = '';
+      showDay(initialDay.id);
+    });
+
+    document.addEventListener('travel-day-change', ((event: CustomEvent<string>) => showDay(event.detail)) as EventListener);
+  });
+</script>

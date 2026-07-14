@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^sqlite3 data/wzt\\.db \"SELECT id, public_id, type, title FROM travel_events LIMIT 10;\" 2>&1$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

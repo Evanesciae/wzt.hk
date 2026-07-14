@@ -1,0 +1,72 @@
+---
+import { getCollection } from 'astro:content';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import KbCard from '../components/KbCard.astro';
+import TravelCard from '../components/TravelCard.astro';
+import { listKbNotes, listTrips } from '../server/database';
+
+const notes = listKbNotes();
+const trips = listTrips();
+const links = (await getCollection('links')).sort((a, b) => a.data.order - b.data.order);
+const currentTrip = trips.find((trip) => trip.status === 'upcoming')
+  ?? trips.find((trip) => trip.status === 'planning');
+const pinnedLinks = links.filter((link) => link.data.pinned).slice(0, 4);
+---
+
+<BaseLayout>
+  <div class="container home-shell">
+    <section class="portal-grid" aria-label="主要区域">
+      <a class="portal-card" href="/kb/">
+        <span class="portal-icon">K</span>
+        <div><h2>知识库</h2><p>{notes.length} 篇笔记</p></div>
+        <span class="portal-arrow">→</span>
+      </a>
+      <a class="portal-card" href="/travel/">
+        <span class="portal-icon">T</span>
+        <div><h2>旅行</h2><p>{trips.length} 个计划</p></div>
+        <span class="portal-arrow">→</span>
+      </a>
+      <a class="portal-card" href="/links/">
+        <span class="portal-icon">L</span>
+        <div><h2>常用链接</h2><p>{links.length} 个入口</p></div>
+        <span class="portal-arrow">→</span>
+      </a>
+    </section>
+
+    <div class="home-columns">
+      <section class="home-section">
+        <div class="section-heading">
+          <div><p class="eyebrow">RECENT NOTES</p><h2>最近更新</h2></div>
+          <a class="text-link" href="/kb/">查看全部 →</a>
+        </div>
+        <div class="stack-list">
+          {notes.slice(0, 3).map((note) => <KbCard note={note} />)}
+        </div>
+      </section>
+
+      <aside class="home-aside">
+        <section class="aside-panel">
+          <div class="section-heading compact">
+            <div><p class="eyebrow">NEXT JOURNEY</p><h2>下一段旅程</h2></div>
+          </div>
+          {currentTrip
+            ? <TravelCard entry={currentTrip} />
+            : <p class="empty-note">暂时没有计划中的旅行。</p>}
+        </section>
+
+        <section class="aside-panel quick-links">
+          <div class="section-heading compact">
+            <div><p class="eyebrow">PINNED</p><h2>快速入口</h2></div>
+          </div>
+          <div class="quick-link-list">
+            {pinnedLinks.map((link) => (
+              <a href={link.data.url} target="_blank" rel="noreferrer">
+                <span>{link.data.title}</span><span>↗</span>
+              </a>
+            ))}
+          </div>
+        </section>
+      </aside>
+    </div>
+  </div>
+</BaseLayout>

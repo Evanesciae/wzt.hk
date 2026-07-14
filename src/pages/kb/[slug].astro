@@ -1,0 +1,31 @@
+---
+import { marked } from 'marked';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { categoryTitle, formatDate } from '../../lib/content';
+import { getKbNote } from '../../server/database';
+
+const slug = Astro.params.slug;
+const note = slug ? getKbNote(slug) : undefined;
+if (!note) return Astro.redirect('/404');
+const date = (value: string) => new Date(`${value}T00:00:00`);
+const bodyHtml = note.body ? marked.parse(note.body) : '';
+---
+
+<BaseLayout title={note.title} description={note.summary}>
+  <div class="container article-shell">
+    <a class="back-link" href="/kb/">← 返回知识库</a>
+    <header class="article-header">
+      <a class="eyebrow text-link" href={`/kb/category/${note.category}/`}>{categoryTitle(note.category)}</a>
+      <h1>{note.title}</h1>
+      <p>{note.summary}</p>
+      <div class="article-meta">
+        <span>创建于 {formatDate(date(note.createdAt))}</span>
+        <span>更新于 {formatDate(date(note.updatedAt))}</span>
+      </div>
+      <div class="tag-list">
+        {note.tags.map((tag) => <span class="tag">{tag}</span>)}
+      </div>
+    </header>
+    <article class="prose" set:html={bodyHtml} />
+  </div>
+</BaseLayout>

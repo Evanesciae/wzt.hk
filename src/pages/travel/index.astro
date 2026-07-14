@@ -1,0 +1,43 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PageHeader from '../../components/PageHeader.astro';
+import TravelCard from '../../components/TravelCard.astro';
+import { listTrips } from '../../server/database';
+
+const trips = listTrips();
+---
+
+<BaseLayout title="旅行" description="旅行计划、清单与途中记录。">
+  <div class="container page-shell">
+    <PageHeader eyebrow="TRAVEL PLANS" title="旅行" description="把期待、路线和仍待确认的小事放在同一个地方。" count={trips.length} />
+
+    <div class="filter-tabs travel-filters" aria-label="按状态筛选">
+      <button class="filter-button is-active" type="button" data-status-filter="all">全部</button>
+      <button class="filter-button" type="button" data-status-filter="upcoming">即将出发</button>
+      <button class="filter-button" type="button" data-status-filter="planning">计划中</button>
+      <button class="filter-button" type="button" data-status-filter="archived">已归档</button>
+    </div>
+
+    <div class="card-grid travel-grid" data-travel-list>
+      {trips.map((entry) => <TravelCard entry={entry} />)}
+    </div>
+    <p class="filter-empty" data-filter-empty hidden>这个状态下还没有旅行计划。</p>
+  </div>
+</BaseLayout>
+
+<script>
+  const buttons = document.querySelectorAll<HTMLButtonElement>('[data-status-filter]');
+  const items = document.querySelectorAll<HTMLElement>('[data-travel-list] .filter-item');
+  const empty = document.querySelector<HTMLElement>('[data-filter-empty]');
+
+  buttons.forEach((button) => button.addEventListener('click', () => {
+    const status = button.dataset.statusFilter;
+    let visible = 0;
+    buttons.forEach((item) => item.classList.toggle('is-active', item === button));
+    items.forEach((item) => {
+      item.hidden = status !== 'all' && item.dataset.status !== status;
+      if (!item.hidden) visible += 1;
+    });
+    if (empty) empty.hidden = visible !== 0;
+  }));
+</script>

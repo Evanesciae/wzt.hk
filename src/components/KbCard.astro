@@ -1,0 +1,27 @@
+---
+import type { KbNote } from '../server/types';
+import { categoryTitle, formatDate } from '../lib/content';
+
+interface Props { note: KbNote }
+const { note } = Astro.props;
+const date = (value: string) => new Date(`${value}T00:00:00`);
+---
+
+<article
+  class="content-card kb-card filter-item"
+  data-category={note.category}
+  data-search={`${note.title} ${note.summary} ${note.tags.join(' ')}`.toLowerCase()}
+>
+  <a class="card-link" href={`/kb/${note.id}/`} aria-label={`阅读：${note.title}`}></a>
+  <div class="card-meta">
+    <a class="text-link category-link" href={`/kb/category/${note.category}/`}>
+      {categoryTitle(note.category)}
+    </a>
+    <time datetime={note.updatedAt}>{formatDate(date(note.updatedAt))}</time>
+  </div>
+  <h2>{note.title}</h2>
+  <p>{note.summary}</p>
+  <div class="tag-list" aria-label="标签">
+    {note.tags.map((tag) => <span class="tag">{tag}</span>)}
+  </div>
+</article>

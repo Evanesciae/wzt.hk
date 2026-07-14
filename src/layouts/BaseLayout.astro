@@ -1,0 +1,70 @@
+---
+import '../styles/global.css';
+import site from '../data/site.json';
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const { title, description = site.description } = Astro.props;
+const pageTitle = title ? `${title} · ${site.title}` : site.title;
+const canonicalURL = new URL(Astro.url.pathname, Astro.site);
+const navItems = [
+  { href: '/', label: '首页' },
+  { href: '/kb/', label: '知识库' },
+  { href: '/travel/', label: '旅行' },
+  { href: '/links/', label: '链接' },
+];
+const currentPath = Astro.url.pathname;
+const adminSession = Astro.locals.adminSession;
+---
+
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="generator" content={Astro.generator} />
+    <meta name="description" content={description} />
+    <meta name="theme-color" content="#ffffff" />
+    {adminSession && <meta name="csrf-token" content={adminSession.csrfToken} />}
+    <link rel="canonical" href={canonicalURL} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>{pageTitle}</title>
+    <slot name="head" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container header-inner">
+        <a class="site-brand" href="/" aria-label="wzt.hk 首页">
+          <span class="brand-mark" aria-hidden="true">W</span>
+          <span>wzt.hk</span>
+        </a>
+        <nav class="site-nav" aria-label="主导航">
+          {navItems.map((item) => {
+            const isActive = item.href === '/'
+              ? currentPath === '/'
+              : currentPath.startsWith(item.href);
+            return (
+              <a href={item.href} aria-current={isActive ? 'page' : undefined}>
+                {item.label}
+              </a>
+            );
+          })}
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <slot />
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-inner">
+        <span>© {new Date().getFullYear()} {site.owner}</span>
+        <span>内容存放在本地，页面由静态文件生成。</span>
+      </div>
+    </footer>
+  </body>
+</html>

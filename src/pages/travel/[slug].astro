@@ -1,0 +1,127 @@
+---
+import { marked } from 'marked';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import TravelEvent from '../../components/TravelEvent.astro';
+import TravelMap from '../../components/TravelMap.astro';
+import PhotoGallery from '../../components/PhotoGallery.astro';
+import { formatDate, formatDateRange, travelStatus } from '../../lib/content';
+import { getTrip } from '../../server/database';
+import { getSession } from '../../server/auth';
+
+const slug = Astro.params.slug;
+const entry = slug ? getTrip(slug) : undefined;
+if (!entry) return Astro.redirect('/404');
+const date = (value: string) => new Date(`${value}T00:00:00`);
+const overviewHtml = entry.body ? marked.parse(entry.body) : '';
+const admin = getSession(Astro.cookies);
+const days = entry.days;
+
+const mapDays = days.map((day) => ({
+  id: day.id,
+  label: formatDate(date(day.date), { month: 'long', day: 'numeric', weekday: 'short' }),
+  city: day.city,
+  points: day.events.flatMap((event, index) => {
+    const hasLocalStops = day.events.some((item) => item.type !== 'transit' && item.location);
+    const includeTransitOrigin = event.type !== 'transit' || !hasLocalStops;
+    // ponytail: 地球上没有合法的 (0,0) 旅游坐标，跳过空/无效点，避免无地址事件画到几内亚湾
+    const validPoint = (lat: number, lng: number) => Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0);
+    const points = event.location && includeTransitOrigin && validPoint(event.location.lat, event.location.lng) ? [{
+      lat: event.location.lat, lng: event.location.lng,
+      title: event.type === 'transit' && event.data.from ? event.data.from : event.title,
+      marker: String(index + 1),
+    }] : [];
+    if (event.type === 'transit' && event.data.endLocation && validPoint(event.data.endLocation.lat, event.data.endLocation.lng)) points.push({
+      lat: event.data.endLocation.lat, lng: event.data.endLocation.lng,
+      title: event.data.to ?? event.title, marker: `${index + 1}′`,
+    });
+    return points;
+  }),
+}));
+
+const photos = days.flatMap((day) => day.events.flatMap((event) => event.photos.map((photo) => ({
+  ...photo, dateLabel: formatDate(date(day.date), { month: 'short', day: 'numeric' }), eventTitle: event.title,
+}))));
+const photoDays = days.map((day) => ({
+  day,
+  photos: day.events.flatMap((event) => event.photos.map((photo) => ({
+    ...photo, dateLabel: formatDate(date(day.date), { month: 'short', day: 'numeric' }), eventTitle: event.title,
+  }))),
+})).filter((group) => group.photos.length > 0);
+---
+
+<BaseLayout title={entry.title} description={entry.summary}>
+  <div class="container trip-page-shell">
+    <div class="trip-top-actions">
+      <a class="back-link" href="/travel/">← 返回旅行</a>
+      {admin && <a class="admin-edit-link" href={`/admin/travel/${entry.id}`}>编辑行程</a>}
+    </div>
+    <header class="article-header travel-article-header">
+      <span class:list={['status', `status-${entry.status}`]}>{travelStatus[entry.status]}</span>
+      <h1>{entry.title}</h1>
+      <p>{entry.summary}</p>
+    </header>
+
+    <dl class="trip-facts">
+      <div><dt>目的地</dt><dd>{entry.destination}</dd></div>
+      <div><dt>时间</dt><dd>{formatDateRange(date(entry.startDate), date(entry.endDate))}</dd></div>
+      <div><dt>行程</dt><dd>{days.length} 天</dd></div>
+      <div><dt>最后更新</dt><dd>{formatDate(date(entry.updatedAt))}</dd></div>
+    </dl>
+
+    <nav class="trip-section-nav" aria-label="行程内容">
+      <a href="#timeline">每日行程</a><a href="#overview">整体信息</a>
+      {photos.length > 0 && <a href="#trip-album">行程相册 <span>{photos.length}</span></a>}
+    </nav>
+
+    {entry.pendingItems.length > 0 && <aside class="pending-panel"><h2>出发前待确认</h2><ul>{entry.pendingItems.map((item) => <li>{item}</li>)}</ul></aside>}
+
+    <section class="trip-timeline-section" id="timeline">
+      <div class="timeline-column">
+        <div class="section-heading trip-section-heading"><div><p class="eyebrow">ITINERARY</p><h2>每日行程</h2></div></div>
+        {days.map((day, dayIndex) => (
+          <section class="travel-day" data-travel-day={day.id}>
+            <header class="day-header">
+              <div class="day-number">{String(dayIndex + 1).padStart(2, '0')}</div>
+              <div>
+                <time datetime={day.date}>{formatDate(date(day.date), { month: 'long', day: 'numeric', weekday: 'long' })}</time>
+                <h2>{day.title ?? day.city}</h2>{day.title && <p>{day.city}</p>}
+              </div>
+              {day.events.some((event) => event.photos.length > 0) && (
+                <a class="day-photo-link" href={`#album-${day.id}`}>本日 {day.events.reduce((total, event) => total + event.photos.length, 0)} 张照片 ↓</a>
+              )}
+            </header>
+            <div class="day-events">{day.events.map((event, index) => <TravelEvent event={event} order={index + 1} />)}</div>
+          </section>
+        ))}
+      </div>
+      <TravelMap days={mapDays} />
+    </section>
+
+    {overviewHtml && <section class="trip-overview" id="overview">
+      <div class="section-heading trip-section-heading"><div><p class="eyebrow">DETAILS</p><h2>整体信息</h2></div></div>
+      <article class="prose" set:html={overviewHtml} />
+    </section>}
+
+    {photos.length > 0 && <section class="trip-album" id="trip-album">
+      <div class="section-heading trip-section-heading"><div><p class="eyebrow">PHOTOS</p><h2>行程相册</h2></div><span>{photos.length} 张</span></div>
+      <div class="album-days">{photoDays.map(({ day, photos: dayPhotos }) => (
+        <section class="album-day" id={`album-${day.id}`}>
+          <header><time>{formatDate(date(day.date), { year: 'numeric', month: 'long', day: 'numeric' })}</time><h3>{day.title ?? day.city}</h3><span>{dayPhotos.length} 张</span></header>
+          <PhotoGallery photos={dayPhotos} />
+        </section>
+      ))}</div>
+    </section>}
+  </div>
+</BaseLayout>
+
+<script>
+  const sections = document.querySelectorAll<HTMLElement>('[data-travel-day]');
+  if (sections.length > 0) {
+    const observer = new IntersectionObserver((entries) => {
+      const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+      const id = (visible?.target as HTMLElement | undefined)?.dataset.travelDay;
+      if (id) document.dispatchEvent(new CustomEvent('travel-day-change', { detail: id }));
+    }, { rootMargin: '-22% 0px -58% 0px', threshold: [0, .15, .4] });
+    sections.forEach((section) => observer.observe(section));
+  }
+</script>
