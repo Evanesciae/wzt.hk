@@ -8,7 +8,7 @@ import { listKbNotes } from '../../../server/database';
 const categorySlug = Astro.params.category;
 const category = kbCategories.find((item) => item.slug === categorySlug);
 if (!category) return Astro.redirect('/404');
-const notes = listKbNotes().filter((note) => note.category === category.slug);
+const notes = (await listKbNotes()).filter((note) => note.category === category.slug);
 ---
 
 <BaseLayout title={`${category.title} · 知识库`} description={category.description}>

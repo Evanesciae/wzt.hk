@@ -10,7 +10,7 @@ export const POST: APIRoute = async ({ request }) => {
     return Response.json({ error: 'INVALID_NOTE' }, { status: 422 });
   }
   try {
-    createKbNote(id, {
+    await createKbNote(id, {
       title: String(body.title).trim(), summary: String(body.summary).trim(), category: String(body.category),
       tags: Array.isArray(body.tags) ? body.tags.filter((t: unknown) => typeof t === 'string') : [],
       body: typeof body.body === 'string' ? body.body : '', draft: Boolean(body.draft), featured: Boolean(body.featured), strict: Boolean(body.strict),

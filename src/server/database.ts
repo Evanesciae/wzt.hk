@@ -1,263 +1,117 @@
-import { mkdirSync, readdirSync, readFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
-import { DatabaseSync } from 'node:sqlite';
-import { parse as parseYaml } from 'yaml';
-import { seedAirports, fallbackAirport } from './airports';
-import type { Airport, EventType, Flight, KbNote, TravelDay, TravelEvent, TravelEventData, TravelPhoto, TravelTrip, TripStatus } from './types';
+import { env } from 'cloudflare:workers';
+import { fallbackAirport } from './airports';
+import type {
+  Airport,
+  CityPhoto,
+  CityPlace,
+  CitySlug,
+  EventType,
+  Flight,
+  KbNote,
+  TravelDay,
+  TravelEvent,
+  TravelEventData,
+  TravelPhoto,
+  TravelTrip,
+  TripStatus,
+} from './types';
 
 type Row = Record<string, unknown>;
-let database: DatabaseSync | undefined;
-let seeded = false;
-const photoTimeZone = process.env.APP_TIME_ZONE ?? 'Asia/Hong_Kong';
+type Bindings = { DB: D1Database; APP_TIME_ZONE?: string };
+type DatabaseValue = string | number | ArrayBuffer | null;
 
-function parseFrontmatter(source: string) {
-  const match = source.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
-  if (!match) throw new Error('Invalid Markdown frontmatter');
-  return { data: parseYaml(match[1]) as Record<string, any>, body: match[2].trim() };
+function database() {
+  return (env as unknown as Bindings).DB;
+}
+
+function statement(sql: string, args: unknown[] = []) {
+  const prepared = database().prepare(sql);
+  return args.length ? prepared.bind(...args as DatabaseValue[]) : prepared;
+}
+
+async function all<T extends Row = Row>(sql: string, args: unknown[] = []) {
+  const result = await statement(sql, args).all<T>();
+  return result.results ?? [];
+}
+
+async function first<T extends Row = Row>(sql: string, args: unknown[] = []) {
+  return await statement(sql, args).first<T>() ?? undefined;
+}
+
+async function run(sql: string, args: unknown[] = []) {
+  return statement(sql, args).run();
+}
+
+function prepared(sql: string, args: unknown[] = []) {
+  const query = database().prepare(sql);
+  return args.length ? query.bind(...args as DatabaseValue[]) : query;
 }
 
 function toDate(value: unknown) {
+  if (!value) return '';
   if (value instanceof Date) return value.toISOString().slice(0, 10);
   return String(value).slice(0, 10);
 }
 
-function initSchema(db: DatabaseSync) {
-  db.exec(`
-    PRAGMA journal_mode = WAL;
-    PRAGMA foreign_keys = ON;
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL,
-      password_hash TEXT NOT NULL, created_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS sessions (
-      token_hash TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      csrf_token TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS trips (
-      id TEXT PRIMARY KEY, title TEXT NOT NULL, destination TEXT NOT NULL,
-      status TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL,
-      summary TEXT NOT NULL, pending_items TEXT NOT NULL DEFAULT '[]',
-      body TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL,
-      draft INTEGER NOT NULL DEFAULT 0, featured INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE TABLE IF NOT EXISTS trip_days (
-      id TEXT PRIMARY KEY, trip_id TEXT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
-      date TEXT NOT NULL, city TEXT NOT NULL, title TEXT, summary TEXT, sort_order INTEGER NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS travel_events (
-      id TEXT PRIMARY KEY, public_id TEXT NOT NULL,
-      day_id TEXT NOT NULL REFERENCES trip_days(id) ON DELETE CASCADE,
-      type TEXT NOT NULL, title TEXT NOT NULL, time TEXT,
-      time_source TEXT NOT NULL DEFAULT 'photo', note TEXT,
-      location_lat REAL, location_lng REAL, location_address TEXT,
-      data TEXT NOT NULL DEFAULT '{}', sort_order INTEGER NOT NULL
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS events_day_public_id ON travel_events(day_id, public_id);
-    CREATE TABLE IF NOT EXISTS travel_photos (
-      id TEXT PRIMARY KEY, event_id TEXT NOT NULL REFERENCES travel_events(id) ON DELETE CASCADE,
-      original_path TEXT NOT NULL, variants TEXT NOT NULL, alt TEXT NOT NULL,
-      caption TEXT, featured INTEGER NOT NULL DEFAULT 0, taken_at TEXT, created_at TEXT NOT NULL,
-      sort_order INTEGER
-    );
-    CREATE INDEX IF NOT EXISTS days_trip_order ON trip_days(trip_id, sort_order);
-    CREATE INDEX IF NOT EXISTS events_day_order ON travel_events(day_id, sort_order);
-    CREATE INDEX IF NOT EXISTS photos_event ON travel_photos(event_id, created_at);
-    CREATE TABLE IF NOT EXISTS kb_notes (
-      id TEXT PRIMARY KEY, title TEXT NOT NULL, summary TEXT NOT NULL,
-      category TEXT NOT NULL, tags TEXT NOT NULL DEFAULT '[]', body TEXT NOT NULL DEFAULT '',
-      created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-      draft INTEGER NOT NULL DEFAULT 0, featured INTEGER NOT NULL DEFAULT 0, strict INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE TABLE IF NOT EXISTS airports (
-      code TEXT PRIMARY KEY, icao TEXT, name TEXT NOT NULL, city TEXT NOT NULL,
-      country TEXT NOT NULL, lat REAL NOT NULL, lng REAL NOT NULL, timezone TEXT
-    );
-    CREATE TABLE IF NOT EXISTS flights (
-      id TEXT PRIMARY KEY, date TEXT NOT NULL, flight_number TEXT NOT NULL,
-      airline_code TEXT, airline_name TEXT, from_airport TEXT NOT NULL REFERENCES airports(code),
-      to_airport TEXT NOT NULL REFERENCES airports(code), scheduled_departure TEXT, scheduled_arrival TEXT,
-      actual_departure TEXT, actual_arrival TEXT, aircraft_type TEXT, aircraft_reg TEXT,
-      cabin TEXT, seat TEXT, distance_km REAL, duration_minutes INTEGER,
-      trip_id TEXT REFERENCES trips(id) ON DELETE SET NULL, note TEXT, source TEXT, raw TEXT,
-      created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS flights_date ON flights(date DESC);
-    CREATE INDEX IF NOT EXISTS flights_route ON flights(from_airport, to_airport);
-  `);
-  try { db.exec('ALTER TABLE travel_photos ADD COLUMN taken_at TEXT'); } catch {}
-  try { db.exec('ALTER TABLE travel_photos ADD COLUMN sort_order INTEGER'); } catch {}
-  let addedTimeSource = false;
-  try { db.exec("ALTER TABLE travel_events ADD COLUMN time_source TEXT NOT NULL DEFAULT 'photo'"); addedTimeSource = true; } catch {}
-  if (addedTimeSource) db.exec("UPDATE travel_events SET time_source='manual' WHERE time IS NOT NULL AND time != ''");
-  try { db.exec('ALTER TABLE kb_notes ADD COLUMN strict INTEGER NOT NULL DEFAULT 0'); } catch {}
-}
-
-export function getDatabase() {
-  if (!database) {
-    const path = resolve(process.env.DB_PATH ?? join(process.cwd(), 'data', 'wzt.db'));
-    mkdirSync(dirname(path), { recursive: true });
-    database = new DatabaseSync(path);
-    initSchema(database);
-  }
-  if (!seeded) {
-    seeded = true;
-    try { seedTravel(database); } catch (error) { console.error('Seed travel failed:', error); }
-    try { migrateLegacyEventIds(database); } catch (error) { console.error('Legacy event migration failed:', error); }
-    try { syncPhotoTimes(database); } catch (error) { console.error('Photo time sync failed:', error); }
-    try { seedKb(database); } catch (error) { console.error('Seed kb failed:', error); }
-    try { seedAirportRows(database); } catch (error) { console.error('Seed airports failed:', error); }
-  }
-  return database;
-}
-
-function seedTravel(db: DatabaseSync) {
-  const count = Number((db.prepare('SELECT COUNT(*) AS count FROM trips').get() as Row).count);
-  if (count > 0) return;
-  const base = resolve(process.env.TRAVEL_SEED_DIR ?? join(process.cwd(), 'src', 'content', 'travel'));
-  let directories: string[] = [];
-  try {
-    directories = readdirSync(base, { withFileTypes: true })
-      .filter((item) => item.isDirectory()).map((item) => item.name);
-  } catch { return; }
-
-  const insertTrip = db.prepare(`INSERT INTO trips
-    (id,title,destination,status,start_date,end_date,summary,pending_items,body,updated_at,draft,featured)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
-  const insertDay = db.prepare(`INSERT INTO trip_days
-    (id,trip_id,date,city,title,summary,sort_order) VALUES (?,?,?,?,?,?,?)`);
-  const insertEvent = db.prepare(`INSERT INTO travel_events
-    (id,public_id,day_id,type,title,time,time_source,note,location_lat,location_lng,location_address,data,sort_order)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`);
-
-  db.exec('BEGIN');
-  try {
-    for (const tripId of directories) {
-      let tripSource: string;
-      try { tripSource = readFileSync(join(base, tripId, 'index.md'), 'utf8'); } catch { continue; }
-      const trip = parseFrontmatter(tripSource);
-      insertTrip.run(tripId, trip.data.title, trip.data.destination, trip.data.status,
-        toDate(trip.data.startDate), toDate(trip.data.endDate), trip.data.summary,
-        JSON.stringify(trip.data.pendingItems ?? []), trip.body, toDate(trip.data.updatedAt),
-        trip.data.draft ? 1 : 0, trip.data.featured ? 1 : 0);
-      const daysDir = join(base, tripId, 'days');
-      let dayFiles: string[] = [];
-      try { dayFiles = readdirSync(daysDir).filter((file) => file.endsWith('.md')).sort(); } catch { continue; }
-      dayFiles.forEach((file, dayIndex) => {
-        const parsed = parseFrontmatter(readFileSync(join(daysDir, file), 'utf8'));
-        const date = toDate(parsed.data.date);
-        const dayId = `${tripId}/${date}`;
-        insertDay.run(dayId, tripId, date, parsed.data.city, parsed.data.title ?? null,
-          parsed.data.summary ?? null, dayIndex);
-        (parsed.data.events ?? []).forEach((event: Record<string, any>, eventIndex: number) => {
-          const location = event.location;
-          const extra = { ...event };
-          for (const key of ['id', 'type', 'title', 'time', 'note', 'location', 'photos']) delete extra[key];
-          insertEvent.run(randomUUID(), event.id, dayId, event.type, event.title,
-            event.time ?? null, event.time ? 'manual' : 'photo', event.note ?? null, location?.lat ?? null, location?.lng ?? null,
-            location?.address ?? null, JSON.stringify(extra), eventIndex);
-        });
-      });
-    }
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
-}
-
-function migrateLegacyEventIds(db: DatabaseSync) {
-  type LegacyEventRow = {
-    id: string; public_id: string; day_id: string; type: string; title: string;
-    time: string | null; time_source?: string | null; note: string | null; location_lat: number | null; location_lng: number | null;
-    location_address: string | null; data: string; sort_order: number;
-  };
-  const rows = db.prepare("SELECT * FROM travel_events WHERE id LIKE '%/%'").all() as LegacyEventRow[];
-  if (rows.length === 0) return;
-  db.exec('BEGIN');
-  try {
-    for (const row of rows) {
-      const newId = randomUUID();
-      db.prepare('UPDATE travel_photos SET event_id=? WHERE event_id=?').run(newId, row.id);
-      db.prepare('DELETE FROM travel_events WHERE id=?').run(row.id);
-      db.prepare(`INSERT INTO travel_events
-        (id,public_id,day_id,type,title,time,time_source,note,location_lat,location_lng,location_address,data,sort_order)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(newId, row.public_id, row.day_id, row.type, row.title,
-        row.time, row.time_source ?? (row.time ? 'manual' : 'photo'), row.note, row.location_lat, row.location_lng, row.location_address, row.data, row.sort_order);
-    }
-    db.exec('COMMIT');
-  } catch (error) { db.exec('ROLLBACK'); throw error; }
-}
-
-function seedKb(db: DatabaseSync) {
-  const count = Number((db.prepare('SELECT COUNT(*) AS count FROM kb_notes').get() as Row).count);
-  if (count > 0) return;
-  const base = resolve(process.env.KB_SEED_DIR ?? join(process.cwd(), 'src', 'content', 'kb'));
-  let files: string[] = [];
-  try { files = readdirSync(base).filter((file) => file.endsWith('.md')); } catch { return; }
-  const insert = db.prepare(`INSERT INTO kb_notes
-    (id,title,summary,category,tags,body,created_at,updated_at,draft,featured,strict)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?)`);
-  db.exec('BEGIN');
-  try {
-    for (const file of files) {
-      let source: string;
-      try { source = readFileSync(join(base, file), 'utf8'); } catch { continue; }
-      const note = parseFrontmatter(source);
-      const id = file.replace(/\.md$/, '');
-      insert.run(id, note.data.title, note.data.summary ?? '', note.data.category ?? 'reference',
-        JSON.stringify(note.data.tags ?? []), note.body, toDate(note.data.createdAt ?? note.data.updatedAt),
-        toDate(note.data.updatedAt ?? note.data.createdAt), note.data.draft ? 1 : 0, note.data.featured ? 1 : 0, 0);
-    }
-    db.exec('COMMIT');
-  } catch (error) { db.exec('ROLLBACK'); throw error; }
-}
-
-function seedAirportRows(db: DatabaseSync) {
-  const insert = db.prepare(`INSERT OR IGNORE INTO airports
-    (code,icao,name,city,country,lat,lng,timezone) VALUES (?,?,?,?,?,?,?,?)`);
-  db.exec('BEGIN');
-  try {
-    seedAirports.forEach((airport) => insert.run(
-      airport.code, airport.icao ?? null, airport.name, airport.city, airport.country,
-      airport.lat, airport.lng, airport.timezone ?? null,
-    ));
-    db.exec('COMMIT');
-  } catch (error) { db.exec('ROLLBACK'); throw error; }
-}
-
 function rowToAirport(row: Row): Airport {
   return {
-    code: String(row.code), icao: row.icao ? String(row.icao) : undefined,
-    name: String(row.name), city: String(row.city), country: String(row.country),
-    lat: Number(row.lat), lng: Number(row.lng), timezone: row.timezone ? String(row.timezone) : undefined,
+    code: String(row.code),
+    icao: row.icao ? String(row.icao) : undefined,
+    name: String(row.name),
+    city: String(row.city),
+    country: String(row.country),
+    lat: Number(row.lat),
+    lng: Number(row.lng),
+    timezone: row.timezone ? String(row.timezone) : undefined,
   };
 }
 
-function ensureAirport(db: DatabaseSync, airport: Airport) {
-  db.prepare(`INSERT INTO airports (code,icao,name,city,country,lat,lng,timezone)
-    VALUES (?,?,?,?,?,?,?,?)
-    ON CONFLICT(code) DO UPDATE SET icao=excluded.icao,name=excluded.name,city=excluded.city,
-      country=excluded.country,lat=excluded.lat,lng=excluded.lng,timezone=excluded.timezone`)
-    .run(airport.code, airport.icao ?? null, airport.name, airport.city, airport.country,
-      airport.lat, airport.lng, airport.timezone ?? null);
+function airportStatement(airport: Airport) {
+  return prepared(
+    `INSERT INTO airports (code,icao,name,city,country,lat,lng,timezone)
+     VALUES (?,?,?,?,?,?,?,?)
+     ON CONFLICT(code) DO UPDATE SET icao=excluded.icao,name=excluded.name,city=excluded.city,
+       country=excluded.country,lat=excluded.lat,lng=excluded.lng,timezone=excluded.timezone`,
+    [
+      airport.code,
+      airport.icao ?? null,
+      airport.name,
+      airport.city,
+      airport.country,
+      airport.lat,
+      airport.lng,
+      airport.timezone ?? null,
+    ],
+  );
 }
 
 function rowToFlight(row: Row): Flight {
   return {
-    id: String(row.id), date: String(row.date), flightNumber: String(row.flight_number),
+    id: String(row.id),
+    date: String(row.date),
+    datePrecision: row.date_precision === 'month' ? 'month' : 'day',
+    flightNumber: String(row.flight_number),
     airlineCode: row.airline_code ? String(row.airline_code) : undefined,
     airlineName: row.airline_name ? String(row.airline_name) : undefined,
     fromAirport: {
-      code: String(row.from_code), icao: row.from_icao ? String(row.from_icao) : undefined,
-      name: String(row.from_name), city: String(row.from_city), country: String(row.from_country),
-      lat: Number(row.from_lat), lng: Number(row.from_lng), timezone: row.from_timezone ? String(row.from_timezone) : undefined,
+      code: String(row.from_code),
+      icao: row.from_icao ? String(row.from_icao) : undefined,
+      name: String(row.from_name),
+      city: String(row.from_city),
+      country: String(row.from_country),
+      lat: Number(row.from_lat),
+      lng: Number(row.from_lng),
+      timezone: row.from_timezone ? String(row.from_timezone) : undefined,
     },
     toAirport: {
-      code: String(row.to_code), icao: row.to_icao ? String(row.to_icao) : undefined,
-      name: String(row.to_name), city: String(row.to_city), country: String(row.to_country),
-      lat: Number(row.to_lat), lng: Number(row.to_lng), timezone: row.to_timezone ? String(row.to_timezone) : undefined,
+      code: String(row.to_code),
+      icao: row.to_icao ? String(row.to_icao) : undefined,
+      name: String(row.to_name),
+      city: String(row.to_city),
+      country: String(row.to_country),
+      lat: Number(row.to_lat),
+      lng: Number(row.to_lng),
+      timezone: row.to_timezone ? String(row.to_timezone) : undefined,
     },
     scheduledDeparture: row.scheduled_departure ? String(row.scheduled_departure) : undefined,
     scheduledArrival: row.scheduled_arrival ? String(row.scheduled_arrival) : undefined,
@@ -273,7 +127,8 @@ function rowToFlight(row: Row): Flight {
     note: row.note ? String(row.note) : undefined,
     source: row.source ? String(row.source) : undefined,
     raw: row.raw ? JSON.parse(String(row.raw)) : undefined,
-    createdAt: String(row.created_at), updatedAt: String(row.updated_at),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
   };
 }
 
@@ -284,46 +139,48 @@ const flightSelect = `SELECT f.*,
 
 export type FlightInput = Omit<Flight, 'id' | 'createdAt' | 'updatedAt'> & { id?: string };
 
-export function listFlights() {
-  return (getDatabase().prepare(`${flightSelect} ORDER BY f.date DESC, f.scheduled_departure DESC, f.flight_number`).all() as Row[]).map(rowToFlight);
+export async function listFlights() {
+  return (await all(`${flightSelect} ORDER BY f.date DESC, f.scheduled_departure DESC, f.flight_number`)).map(rowToFlight);
 }
 
-export function getFlight(id: string) {
-  const row = getDatabase().prepare(`${flightSelect} WHERE f.id=?`).get(id) as Row | undefined;
+export async function getFlight(id: string) {
+  const row = await first(`${flightSelect} WHERE f.id=?`, [id]);
   return row ? rowToFlight(row) : undefined;
 }
 
-export function listAirports() {
-  return (getDatabase().prepare('SELECT * FROM airports ORDER BY code').all() as Row[]).map(rowToAirport);
+export async function listAirports() {
+  return (await all('SELECT * FROM airports ORDER BY code')).map(rowToAirport);
 }
 
-export function getAirport(code: string) {
-  const row = getDatabase().prepare('SELECT * FROM airports WHERE code=?').get(code.trim().toUpperCase()) as Row | undefined;
+export async function getAirport(code: string) {
+  const row = await first('SELECT * FROM airports WHERE code=?', [code.trim().toUpperCase()]);
   return row ? rowToAirport(row) : undefined;
 }
 
-export function searchAirports(query: string) {
-  const q = `%${query.trim().toUpperCase()}%`;
-  return (getDatabase().prepare(`SELECT * FROM airports
-    WHERE upper(code) LIKE ? OR upper(coalesce(icao,'')) LIKE ? OR upper(name) LIKE ? OR upper(city) LIKE ? OR upper(country) LIKE ?
-    ORDER BY CASE WHEN upper(code)=upper(?) THEN 0 WHEN upper(code) LIKE upper(?) THEN 1 ELSE 2 END, code
-    LIMIT 12`).all(q, q, q, q, q, query.trim(), `${query.trim()}%`) as Row[]).map(rowToAirport);
+export async function searchAirports(query: string) {
+  const normalized = query.trim().toUpperCase();
+  const q = `%${normalized}%`;
+  return (await all(
+    `SELECT * FROM airports
+     WHERE upper(code) LIKE ? OR upper(coalesce(icao,'')) LIKE ? OR upper(name) LIKE ? OR upper(city) LIKE ? OR upper(country) LIKE ?
+     ORDER BY CASE WHEN upper(code)=upper(?) THEN 0 WHEN upper(code) LIKE upper(?) THEN 1 ELSE 2 END, code
+     LIMIT 12`,
+    [q, q, q, q, q, normalized, `${normalized}%`],
+  )).map(rowToAirport);
 }
 
-export function upsertAirport(airport: Airport) {
+export async function upsertAirport(airport: Airport) {
   const code = airport.code.trim().toUpperCase();
   if (!/^[A-Z0-9]{3}$/.test(code)) throw new Error('INVALID_AIRPORT_CODE');
-  ensureAirport(getDatabase(), { ...airport, code });
+  await airportStatement({ ...airport, code }).run();
   return code;
 }
 
-export function deleteAirport(code: string) {
+export async function deleteAirport(code: string) {
   const normalized = code.trim().toUpperCase();
-  const db = getDatabase();
-  const usage = db.prepare('SELECT COUNT(*) AS count FROM flights WHERE from_airport=? OR to_airport=?')
-    .get(normalized, normalized) as Row;
-  if (Number(usage.count) > 0) throw new Error('AIRPORT_IN_USE');
-  db.prepare('DELETE FROM airports WHERE code=?').run(normalized);
+  const usage = await first('SELECT COUNT(*) AS count FROM flights WHERE from_airport=? OR to_airport=?', [normalized, normalized]);
+  if (Number(usage?.count) > 0) throw new Error('AIRPORT_IN_USE');
+  await run('DELETE FROM airports WHERE code=?', [normalized]);
 }
 
 function flightDistanceKm(from: Airport, to: Airport) {
@@ -345,98 +202,128 @@ function flightDurationMinutes(start?: string, end?: string) {
   return Math.round((to - from) / 60000);
 }
 
-export function upsertFlight(input: FlightInput) {
-  const db = getDatabase();
-  const id = input.id ?? randomUUID();
+export async function upsertFlight(input: FlightInput) {
+  const id = input.id ?? crypto.randomUUID();
   const now = new Date().toISOString();
   const from = input.fromAirport.code ? input.fromAirport : fallbackAirport(input.fromAirport.code);
   const to = input.toAirport.code ? input.toAirport : fallbackAirport(input.toAirport.code);
   const distance = input.distanceKm ?? flightDistanceKm(from, to);
-  const duration = input.durationMinutes ?? flightDurationMinutes(input.actualDeparture ?? input.scheduledDeparture, input.actualArrival ?? input.scheduledArrival);
-  db.exec('BEGIN');
-  try {
-    ensureAirport(db, from);
-    ensureAirport(db, to);
-    db.prepare(`INSERT INTO flights
-      (id,date,flight_number,airline_code,airline_name,from_airport,to_airport,scheduled_departure,
-       scheduled_arrival,actual_departure,actual_arrival,aircraft_type,aircraft_reg,cabin,seat,
-       distance_km,duration_minutes,trip_id,note,source,raw,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-      ON CONFLICT(id) DO UPDATE SET date=excluded.date,flight_number=excluded.flight_number,
-       airline_code=excluded.airline_code,airline_name=excluded.airline_name,from_airport=excluded.from_airport,
-       to_airport=excluded.to_airport,scheduled_departure=excluded.scheduled_departure,
-       scheduled_arrival=excluded.scheduled_arrival,actual_departure=excluded.actual_departure,
-       actual_arrival=excluded.actual_arrival,aircraft_type=excluded.aircraft_type,
-       aircraft_reg=excluded.aircraft_reg,cabin=excluded.cabin,seat=excluded.seat,
-       distance_km=excluded.distance_km,duration_minutes=excluded.duration_minutes,
-       trip_id=excluded.trip_id,note=excluded.note,source=excluded.source,raw=excluded.raw,
-       updated_at=excluded.updated_at`)
-      .run(id, input.date, input.flightNumber, input.airlineCode ?? null, input.airlineName ?? null,
-        from.code, to.code, input.scheduledDeparture ?? null, input.scheduledArrival ?? null,
-        input.actualDeparture ?? null, input.actualArrival ?? null, input.aircraftType ?? null,
-        input.aircraftReg ?? null, input.cabin ?? null, input.seat ?? null, distance ?? null,
-        duration ?? null, input.tripId ?? null, input.note ?? null, input.source ?? null,
-        input.raw ? JSON.stringify(input.raw) : null, now, now);
-    db.exec('COMMIT');
-  } catch (error) { db.exec('ROLLBACK'); throw error; }
+  const duration = input.durationMinutes
+    ?? flightDurationMinutes(input.actualDeparture ?? input.scheduledDeparture, input.actualArrival ?? input.scheduledArrival);
+  await database().batch([
+    airportStatement(from),
+    airportStatement(to),
+    prepared(
+      `INSERT INTO flights
+       (id,date,date_precision,flight_number,airline_code,airline_name,from_airport,to_airport,scheduled_departure,
+        scheduled_arrival,actual_departure,actual_arrival,aircraft_type,aircraft_reg,cabin,seat,
+        distance_km,duration_minutes,trip_id,note,source,raw,created_at,updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       ON CONFLICT(id) DO UPDATE SET date=excluded.date,date_precision=excluded.date_precision,flight_number=excluded.flight_number,
+        airline_code=excluded.airline_code,airline_name=excluded.airline_name,from_airport=excluded.from_airport,
+        to_airport=excluded.to_airport,scheduled_departure=excluded.scheduled_departure,
+        scheduled_arrival=excluded.scheduled_arrival,actual_departure=excluded.actual_departure,
+        actual_arrival=excluded.actual_arrival,aircraft_type=excluded.aircraft_type,
+        aircraft_reg=excluded.aircraft_reg,cabin=excluded.cabin,seat=excluded.seat,
+        distance_km=excluded.distance_km,duration_minutes=excluded.duration_minutes,
+        trip_id=excluded.trip_id,note=excluded.note,source=excluded.source,raw=excluded.raw,
+        updated_at=excluded.updated_at`,
+      [
+        id, input.date, input.datePrecision ?? 'day', input.flightNumber,
+        input.airlineCode ?? null, input.airlineName ?? null, from.code, to.code,
+        input.scheduledDeparture ?? null, input.scheduledArrival ?? null,
+        input.actualDeparture ?? null, input.actualArrival ?? null,
+        input.aircraftType ?? null, input.aircraftReg ?? null, input.cabin ?? null,
+        input.seat ?? null, distance ?? null, duration ?? null, input.tripId ?? null,
+        input.note ?? null, input.source ?? null, input.raw ? JSON.stringify(input.raw) : null,
+        now, now,
+      ],
+    ),
+  ]);
   return id;
 }
 
-export function deleteFlight(id: string) {
-  getDatabase().prepare('DELETE FROM flights WHERE id=?').run(id);
+export async function deleteFlight(id: string) {
+  await run('DELETE FROM flights WHERE id=?', [id]);
 }
 
 function rowToKbNote(row: Row): KbNote {
   return {
-    id: String(row.id), title: String(row.title), summary: String(row.summary),
-    category: String(row.category), tags: JSON.parse(String(row.tags)), body: String(row.body),
-    createdAt: String(row.created_at), updatedAt: String(row.updated_at),
-    draft: Boolean(row.draft), featured: Boolean(row.featured), strict: Boolean(row.strict),
+    id: String(row.id),
+    title: String(row.title),
+    summary: String(row.summary),
+    category: String(row.category),
+    tags: JSON.parse(String(row.tags)),
+    body: String(row.body),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+    draft: Boolean(row.draft),
+    featured: Boolean(row.featured),
+    strict: Boolean(row.strict),
   };
 }
 
-export function listKbNotes(includeDrafts = false): KbNote[] {
-  const rows = getDatabase().prepare(`SELECT * FROM kb_notes ${includeDrafts ? '' : 'WHERE draft = 0'}
-    ORDER BY updated_at DESC`).all() as Row[];
+export async function listKbNotes(includeDrafts = false): Promise<KbNote[]> {
+  const rows = await all(`SELECT * FROM kb_notes ${includeDrafts ? '' : 'WHERE draft = 0'} ORDER BY updated_at DESC`);
   return rows.map(rowToKbNote);
 }
 
-export function getKbNote(id: string, includeDrafts = false): KbNote | undefined {
-  const row = getDatabase().prepare(`SELECT * FROM kb_notes WHERE id = ? ${includeDrafts ? '' : 'AND draft = 0'}`)
-    .get(id) as Row | undefined;
+export async function getKbNote(id: string, includeDrafts = false): Promise<KbNote | undefined> {
+  const row = await first(`SELECT * FROM kb_notes WHERE id = ? ${includeDrafts ? '' : 'AND draft = 0'}`, [id]);
   return row ? rowToKbNote(row) : undefined;
 }
 
 export interface KbNoteInput {
-  title: string; summary: string; category: string; tags?: string[];
-  body?: string; draft?: boolean; featured?: boolean; strict?: boolean;
+  title: string;
+  summary: string;
+  category: string;
+  tags?: string[];
+  body?: string;
+  draft?: boolean;
+  featured?: boolean;
+  strict?: boolean;
 }
 
-export function createKbNote(id: string, input: KbNoteInput) {
-  const now = toDate(new Date().toISOString());
-  getDatabase().prepare(`INSERT INTO kb_notes
-    (id,title,summary,category,tags,body,created_at,updated_at,draft,featured,strict) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(id, input.title, input.summary, input.category, JSON.stringify(input.tags ?? []), input.body ?? '', now, now,
-      input.draft ? 1 : 0, input.featured ? 1 : 0, input.strict ? 1 : 0);
+export async function createKbNote(id: string, input: KbNoteInput) {
+  const now = toDate(new Date());
+  await run(
+    `INSERT INTO kb_notes
+     (id,title,summary,category,tags,body,created_at,updated_at,draft,featured,strict)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+    [
+      id, input.title, input.summary, input.category, JSON.stringify(input.tags ?? []),
+      input.body ?? '', now, now, input.draft ? 1 : 0, input.featured ? 1 : 0,
+      input.strict ? 1 : 0,
+    ],
+  );
   return id;
 }
 
-export function updateKbNote(id: string, input: KbNoteInput) {
-  getDatabase().prepare(`UPDATE kb_notes SET title=?,summary=?,category=?,tags=?,body=?,draft=?,featured=?,strict=?,updated_at=? WHERE id=?`)
-    .run(input.title, input.summary, input.category, JSON.stringify(input.tags ?? []), input.body ?? '',
-      input.draft ? 1 : 0, input.featured ? 1 : 0, input.strict ? 1 : 0, toDate(new Date().toISOString()), id);
+export async function updateKbNote(id: string, input: KbNoteInput) {
+  await run(
+    `UPDATE kb_notes SET title=?,summary=?,category=?,tags=?,body=?,draft=?,featured=?,strict=?,updated_at=? WHERE id=?`,
+    [
+      input.title, input.summary, input.category, JSON.stringify(input.tags ?? []), input.body ?? '',
+      input.draft ? 1 : 0, input.featured ? 1 : 0, input.strict ? 1 : 0, toDate(new Date()), id,
+    ],
+  );
 }
 
-export function deleteKbNote(id: string) {
-  getDatabase().prepare('DELETE FROM kb_notes WHERE id=?').run(id);
+export async function deleteKbNote(id: string) {
+  await run('DELETE FROM kb_notes WHERE id=?', [id]);
 }
 
 function rowToPhoto(row: Row): TravelPhoto {
   return {
-    id: String(row.id), eventId: String(row.event_id), originalPath: String(row.original_path),
-    variants: JSON.parse(String(row.variants)), alt: String(row.alt),
-    caption: row.caption ? String(row.caption) : undefined, featured: Boolean(row.featured),
-    takenAt: row.taken_at ? String(row.taken_at) : undefined, createdAt: String(row.created_at),
+    id: String(row.id),
+    eventId: String(row.event_id),
+    originalPath: String(row.original_path),
+    variants: JSON.parse(String(row.variants)),
+    alt: String(row.alt),
+    caption: row.caption ? String(row.caption) : undefined,
+    featured: Boolean(row.featured),
+    takenAt: row.taken_at ? String(row.taken_at) : undefined,
+    createdAt: String(row.created_at),
     sortOrder: row.sort_order == null ? null : Number(row.sort_order),
   };
 }
@@ -450,87 +337,119 @@ function hourFromTakenAt(value: unknown) {
   }
   const date = new Date(text);
   if (Number.isNaN(date.getTime())) return null;
-  const hour = new Intl.DateTimeFormat('en-GB', { timeZone: photoTimeZone, hour: '2-digit', hourCycle: 'h23' }).format(date);
+  const timeZone = (env as unknown as Bindings).APP_TIME_ZONE ?? 'Asia/Hong_Kong';
+  const hour = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hour: '2-digit',
+    hourCycle: 'h23',
+  }).format(date);
   return `${hour}:00`;
 }
 
-function touchTripForEvent(db: DatabaseSync, eventId: string) {
-  db.prepare(`UPDATE trips SET updated_at=date('now') WHERE id=(SELECT d.trip_id FROM trip_days d
-    JOIN travel_events e ON e.day_id=d.id WHERE e.id=?)`).run(eventId);
+async function touchTripForEvent(eventId: string) {
+  await run(
+    `UPDATE trips SET updated_at=date('now') WHERE id=(
+       SELECT d.trip_id FROM trip_days d JOIN travel_events e ON e.day_id=d.id WHERE e.id=?
+     )`,
+    [eventId],
+  );
 }
 
-export function syncEventTimeFromPhotos(eventId: string) {
-  const db = getDatabase();
-  const event = db.prepare('SELECT time_source FROM travel_events WHERE id=?').get(eventId) as Row | undefined;
+export async function syncEventTimeFromPhotos(eventId: string) {
+  const event = await first('SELECT time_source FROM travel_events WHERE id=?', [eventId]);
   if (!event || String(event.time_source) !== 'photo') return;
-  const row = db.prepare('SELECT MIN(taken_at) AS taken_at FROM travel_photos WHERE event_id=? AND taken_at IS NOT NULL')
-    .get(eventId) as Row | undefined;
-  db.prepare('UPDATE travel_events SET time=? WHERE id=?').run(hourFromTakenAt(row?.taken_at), eventId);
-  touchTripForEvent(db, eventId);
-}
-
-function syncPhotoTimes(db: DatabaseSync) {
-  const rows = db.prepare(`SELECT e.id, e.time, MIN(p.taken_at) AS taken_at
-    FROM travel_events e JOIN travel_photos p ON p.event_id=e.id
-    WHERE e.time_source='photo' AND p.taken_at IS NOT NULL
-    GROUP BY e.id`).all() as Row[];
-  const update = db.prepare('UPDATE travel_events SET time=? WHERE id=?');
-  db.exec('BEGIN');
-  try {
-    rows.forEach((row) => {
-      const time = hourFromTakenAt(row.taken_at);
-      if (time !== row.time) update.run(time, String(row.id));
-    });
-    db.exec('COMMIT');
-  } catch (error) { db.exec('ROLLBACK'); throw error; }
+  const row = await first(
+    'SELECT MIN(taken_at) AS taken_at FROM travel_photos WHERE event_id=? AND taken_at IS NOT NULL',
+    [eventId],
+  );
+  await database().batch([
+    prepared('UPDATE travel_events SET time=? WHERE id=?', [hourFromTakenAt(row?.taken_at), eventId]),
+    prepared(
+      `UPDATE trips SET updated_at=date('now') WHERE id=(
+         SELECT d.trip_id FROM trip_days d JOIN travel_events e ON e.day_id=d.id WHERE e.id=?
+       )`,
+      [eventId],
+    ),
+  ]);
 }
 
 function rowToEvent(row: Row, photos: TravelPhoto[]): TravelEvent {
   const location = row.location_lat == null ? undefined : {
-    lat: Number(row.location_lat), lng: Number(row.location_lng),
+    lat: Number(row.location_lat),
+    lng: Number(row.location_lng),
     address: row.location_address ? String(row.location_address) : undefined,
   };
   return {
-    id: String(row.id), publicId: String(row.public_id), dayId: String(row.day_id),
-    type: String(row.type) as EventType, title: String(row.title),
-    time: row.time ? String(row.time) : undefined, note: row.note ? String(row.note) : undefined,
+    id: String(row.id),
+    publicId: String(row.public_id),
+    dayId: String(row.day_id),
+    type: String(row.type) as EventType,
+    title: String(row.title),
+    time: row.time ? String(row.time) : undefined,
+    note: row.note ? String(row.note) : undefined,
     timeSource: row.time_source === 'manual' ? 'manual' : 'photo',
-    location, data: JSON.parse(String(row.data)) as TravelEventData,
-    sortOrder: Number(row.sort_order), photos: photos.filter((photo) => photo.eventId === row.id),
+    location,
+    data: JSON.parse(String(row.data)) as TravelEventData,
+    sortOrder: Number(row.sort_order),
+    photos: photos.filter((photo) => photo.eventId === row.id),
   };
 }
 
 function baseTrip(row: Row): TravelTrip {
   return {
-    id: String(row.id), title: String(row.title), destination: String(row.destination),
-    status: String(row.status) as TripStatus, startDate: String(row.start_date), endDate: String(row.end_date),
-    summary: String(row.summary), pendingItems: JSON.parse(String(row.pending_items)), body: String(row.body),
-    updatedAt: String(row.updated_at), draft: Boolean(row.draft), featured: Boolean(row.featured), days: [],
+    id: String(row.id),
+    title: String(row.title),
+    destination: String(row.destination),
+    status: String(row.status) as TripStatus,
+    startDate: row.start_date ? String(row.start_date) : undefined,
+    endDate: row.end_date ? String(row.end_date) : undefined,
+    datesTbd: Boolean(row.dates_tbd),
+    summary: String(row.summary),
+    pendingItems: JSON.parse(String(row.pending_items)),
+    body: String(row.body),
+    updatedAt: String(row.updated_at),
+    draft: Boolean(row.draft),
+    featured: Boolean(row.featured),
+    days: [],
   };
 }
 
-export function listTrips(includeDrafts = false): TravelTrip[] {
-  const rows = getDatabase().prepare(`SELECT * FROM trips ${includeDrafts ? '' : 'WHERE draft = 0'}
-    ORDER BY featured DESC, start_date DESC`).all() as Row[];
+export async function listTrips(includeDrafts = false): Promise<TravelTrip[]> {
+  const rows = await all(
+    `SELECT * FROM trips ${includeDrafts ? '' : 'WHERE draft = 0'}
+     ORDER BY featured DESC, dates_tbd DESC, start_date DESC, updated_at DESC`,
+  );
   return rows.map(baseTrip);
 }
 
-export function getTrip(tripId: string, includeDrafts = false): TravelTrip | undefined {
-  const db = getDatabase();
-  const row = db.prepare(`SELECT * FROM trips WHERE id = ? ${includeDrafts ? '' : 'AND draft = 0'}`)
-    .get(tripId) as Row | undefined;
+export async function getTrip(tripId: string, includeDrafts = false): Promise<TravelTrip | undefined> {
+  const [row, dayRows, eventRows, photoRows] = await Promise.all([
+    first(`SELECT * FROM trips WHERE id = ? ${includeDrafts ? '' : 'AND draft = 0'}`, [tripId]),
+    all('SELECT * FROM trip_days WHERE trip_id = ? ORDER BY sort_order, date', [tripId]),
+    all(
+      `SELECT e.* FROM travel_events e JOIN trip_days d ON d.id=e.day_id
+       WHERE d.trip_id=? ORDER BY d.sort_order,e.sort_order`,
+      [tripId],
+    ),
+    all(
+      `SELECT p.* FROM travel_photos p JOIN travel_events e ON e.id=p.event_id
+       JOIN trip_days d ON d.id=e.day_id WHERE d.trip_id=?
+       ORDER BY p.sort_order IS NULL, p.sort_order, p.taken_at IS NULL, p.taken_at, p.created_at`,
+      [tripId],
+    ),
+  ]);
   if (!row) return;
-  const dayRows = db.prepare('SELECT * FROM trip_days WHERE trip_id = ? ORDER BY sort_order, date').all(tripId) as Row[];
-  const eventRows = db.prepare(`SELECT e.* FROM travel_events e JOIN trip_days d ON d.id=e.day_id
-    WHERE d.trip_id=? ORDER BY d.sort_order,e.sort_order`).all(tripId) as Row[];
-  const photoRows = db.prepare(`SELECT p.* FROM travel_photos p JOIN travel_events e ON e.id=p.event_id
-    JOIN trip_days d ON d.id=e.day_id WHERE d.trip_id=? ORDER BY p.sort_order IS NULL, p.sort_order, p.taken_at IS NULL, p.taken_at, p.created_at`).all(tripId) as Row[];
   const photos = photoRows.map(rowToPhoto);
   const events = eventRows.map((event) => rowToEvent(event, photos));
   const days: TravelDay[] = dayRows.map((day) => ({
-    id: String(day.id), tripId: String(day.trip_id), date: String(day.date), city: String(day.city),
-    title: day.title ? String(day.title) : undefined, summary: day.summary ? String(day.summary) : undefined,
-    sortOrder: Number(day.sort_order), events: events.filter((event) => event.dayId === day.id),
+    id: String(day.id),
+    tripId: String(day.trip_id),
+    date: day.date ? String(day.date) : undefined,
+    city: String(day.city),
+    title: day.title ? String(day.title) : undefined,
+    summary: day.summary ? String(day.summary) : undefined,
+    sortOrder: Number(day.sort_order),
+    events: events.filter((event) => event.dayId === day.id),
   }));
   return { ...baseTrip(row), days };
 }
@@ -538,94 +457,124 @@ export function getTrip(tripId: string, includeDrafts = false): TravelTrip | und
 const tripStatuses = new Set<TripStatus>(['upcoming', 'planning', 'archived']);
 
 export interface TripInput {
-  id?: string; title: string; destination: string; status: TripStatus;
-  startDate: string; endDate: string; summary: string;
-  pendingItems?: string[]; body?: string; draft?: boolean; featured?: boolean;
+  id?: string;
+  title: string;
+  destination: string;
+  status: TripStatus;
+  startDate?: string;
+  endDate?: string;
+  datesTbd?: boolean;
+  summary: string;
+  pendingItems?: string[];
+  body?: string;
+  draft?: boolean;
+  featured?: boolean;
 }
 
-export function createTrip(input: TripInput) {
-  const db = getDatabase();
+export async function createTrip(input: TripInput) {
   if (!input.id || !tripStatuses.has(input.status)) throw new Error('INVALID_INPUT');
-  db.prepare(`INSERT INTO trips
-    (id,title,destination,status,start_date,end_date,summary,pending_items,body,updated_at,draft,featured)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-    input.id, input.title, input.destination, input.status, toDate(input.startDate), toDate(input.endDate),
-    input.summary, JSON.stringify(input.pendingItems ?? []), input.body ?? '', toDate(new Date().toISOString()), input.draft ? 1 : 0, input.featured ? 1 : 0,
+  await run(
+    `INSERT INTO trips
+     (id,title,destination,status,start_date,end_date,summary,pending_items,body,updated_at,draft,featured,dates_tbd)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [
+      input.id, input.title, input.destination, input.status,
+      input.datesTbd ? '' : toDate(input.startDate),
+      input.datesTbd ? '' : toDate(input.endDate),
+      input.summary, JSON.stringify(input.pendingItems ?? []), input.body ?? '',
+      toDate(new Date()), input.draft ? 1 : 0, input.featured ? 1 : 0, input.datesTbd ? 1 : 0,
+    ],
   );
   return input.id;
 }
 
-export function updateTrip(tripId: string, input: TripInput) {
+export async function updateTrip(tripId: string, input: TripInput) {
   if (!tripStatuses.has(input.status)) throw new Error('INVALID_STATUS');
-  getDatabase().prepare(`UPDATE trips SET title=?,destination=?,status=?,start_date=?,end_date=?,summary=?,
-    pending_items=?,body=?,draft=?,featured=?,updated_at=date('now') WHERE id=?`).run(
-    input.title, input.destination, input.status, toDate(input.startDate), toDate(input.endDate),
-    input.summary, JSON.stringify(input.pendingItems ?? []), input.body ?? '', input.draft ? 1 : 0, input.featured ? 1 : 0, tripId,
+  await run(
+    `UPDATE trips SET title=?,destination=?,status=?,start_date=?,end_date=?,dates_tbd=?,summary=?,
+     pending_items=?,body=?,draft=?,featured=?,updated_at=date('now') WHERE id=?`,
+    [
+      input.title, input.destination, input.status,
+      input.datesTbd ? '' : toDate(input.startDate),
+      input.datesTbd ? '' : toDate(input.endDate),
+      input.datesTbd ? 1 : 0, input.summary, JSON.stringify(input.pendingItems ?? []),
+      input.body ?? '', input.draft ? 1 : 0, input.featured ? 1 : 0, tripId,
+    ],
   );
 }
 
-export function deleteTrip(tripId: string) {
-  getDatabase().prepare('DELETE FROM trips WHERE id=?').run(tripId);
+export async function deleteTrip(tripId: string) {
+  await run('DELETE FROM trips WHERE id=?', [tripId]);
 }
 
-export function listTripPhotoIds(tripId: string) {
-  const rows = getDatabase().prepare(`SELECT p.id FROM travel_photos p JOIN travel_events e ON e.id=p.event_id
-    JOIN trip_days d ON d.id=e.day_id WHERE d.trip_id=?`).all(tripId) as Row[];
+export async function listTripPhotoIds(tripId: string) {
+  const rows = await all(
+    `SELECT p.id FROM travel_photos p JOIN travel_events e ON e.id=p.event_id
+     JOIN trip_days d ON d.id=e.day_id WHERE d.trip_id=?`,
+    [tripId],
+  );
   return rows.map((row) => String(row.id));
 }
 
-export interface DayInput { date: string; city: string; title?: string; summary?: string }
+export interface DayInput {
+  date?: string;
+  city: string;
+  title?: string;
+  summary?: string;
+}
 
-export function createDay(tripId: string, input: DayInput) {
-  const db = getDatabase();
-  const dayId = `${tripId}/${toDate(input.date)}`;
-  const sortOrder = Number((db.prepare('SELECT COUNT(*) AS count FROM trip_days WHERE trip_id=?').get(tripId) as Row).count);
-  db.exec('BEGIN');
-  try {
-    db.prepare(`INSERT INTO trip_days (id,trip_id,date,city,title,summary,sort_order) VALUES (?,?,?,?,?,?,?)`)
-      .run(dayId, tripId, toDate(input.date), input.city, input.title ?? null, input.summary ?? null, sortOrder);
-    db.prepare('UPDATE trips SET updated_at=date(\'now\') WHERE id=?').run(tripId);
-    db.exec('COMMIT');
-  } catch (error) { db.exec('ROLLBACK'); throw error; }
+export async function createDay(tripId: string, input: DayInput) {
+  const normalizedDate = input.date ? toDate(input.date) : '';
+  const dayId = normalizedDate ? `${tripId}/${normalizedDate}` : `${tripId}/day-${crypto.randomUUID().slice(0, 8)}`;
+  const count = await first('SELECT COUNT(*) AS count FROM trip_days WHERE trip_id=?', [tripId]);
+  await database().batch([
+    prepared(
+      'INSERT INTO trip_days (id,trip_id,date,city,title,summary,sort_order) VALUES (?,?,?,?,?,?,?)',
+      [dayId, tripId, normalizedDate, input.city, input.title ?? null, input.summary ?? null, Number(count?.count)],
+    ),
+    prepared("UPDATE trips SET updated_at=date('now') WHERE id=?", [tripId]),
+  ]);
   return dayId;
 }
 
-export function updateDay(dayId: string, input: DayInput) {
-  const db = getDatabase();
-  db.exec('BEGIN');
-  try {
-    db.prepare('UPDATE trip_days SET date=?,city=?,title=?,summary=? WHERE id=?')
-      .run(toDate(input.date), input.city, input.title ?? null, input.summary ?? null, dayId);
-    db.prepare(`UPDATE trips SET updated_at=date('now') WHERE id=(SELECT trip_id FROM trip_days WHERE id=?)`).run(dayId);
-    db.exec('COMMIT');
-  } catch (error) { db.exec('ROLLBACK'); throw error; }
+export async function updateDay(dayId: string, input: DayInput) {
+  await database().batch([
+    prepared(
+      'UPDATE trip_days SET date=?,city=?,title=?,summary=? WHERE id=?',
+      [input.date ? toDate(input.date) : '', input.city, input.title ?? null, input.summary ?? null, dayId],
+    ),
+    prepared(
+      `UPDATE trips SET updated_at=date('now') WHERE id=(SELECT trip_id FROM trip_days WHERE id=?)`,
+      [dayId],
+    ),
+  ]);
 }
 
-export function deleteDay(dayId: string) {
-  const db = getDatabase();
-  db.exec('BEGIN');
-  try {
-    db.prepare('DELETE FROM trip_days WHERE id=?').run(dayId);
-    db.prepare(`UPDATE trips SET updated_at=date('now') WHERE id=(SELECT trip_id FROM trip_days WHERE id=?)`).run(dayId);
-    db.exec('COMMIT');
-  } catch (error) { db.exec('ROLLBACK'); throw error; }
+export async function deleteDay(dayId: string) {
+  const day = await first('SELECT trip_id FROM trip_days WHERE id=?', [dayId]);
+  if (!day) return;
+  await database().batch([
+    prepared('DELETE FROM trip_days WHERE id=?', [dayId]),
+    prepared("UPDATE trips SET updated_at=date('now') WHERE id=?", [String(day.trip_id)]),
+  ]);
 }
 
-export function listDayPhotoIds(dayId: string) {
-  const rows = getDatabase().prepare(`SELECT p.id FROM travel_photos p JOIN travel_events e ON e.id=p.event_id
-    WHERE e.day_id=?`).all(dayId) as Row[];
+export async function listDayPhotoIds(dayId: string) {
+  const rows = await all(
+    `SELECT p.id FROM travel_photos p JOIN travel_events e ON e.id=p.event_id WHERE e.day_id=?`,
+    [dayId],
+  );
   return rows.map((row) => String(row.id));
 }
 
-export function reorderDays(tripId: string, dayIds: string[]) {
-  const db = getDatabase();
-  const stmt = db.prepare('UPDATE trip_days SET sort_order=? WHERE id=? AND trip_id=?');
-  db.exec('BEGIN');
-  try {
-    dayIds.forEach((id, index) => stmt.run(index, id, tripId));
-    db.prepare('UPDATE trips SET updated_at=date(\'now\') WHERE id=?').run(tripId);
-    db.exec('COMMIT');
-  } catch (error) { db.exec('ROLLBACK'); throw error; }
+export async function reorderDays(tripId: string, dayIds: string[]) {
+  await database().batch([
+    ...dayIds.map((id, index) => prepared(
+      'UPDATE trip_days SET sort_order=? WHERE id=? AND trip_id=?',
+      [index, id, tripId],
+    )),
+    prepared("UPDATE trips SET updated_at=date('now') WHERE id=?", [tripId]),
+  ]);
 }
 
 export interface EventInput {
@@ -640,93 +589,286 @@ export interface EventInput {
   data?: TravelEventData;
 }
 
-export function createEvent(input: EventInput) {
-  const db = getDatabase();
-  const existing = db.prepare('SELECT id FROM travel_events WHERE day_id=? ORDER BY sort_order').all(input.dayId) as Row[];
+export async function createEvent(input: EventInput) {
+  const existing = await all('SELECT id FROM travel_events WHERE day_id=? ORDER BY sort_order', [input.dayId]);
   let position = existing.length;
   if (input.afterEventId === '__start__') position = 0;
   else if (input.afterEventId) {
     const index = existing.findIndex((row) => row.id === input.afterEventId);
     if (index >= 0) position = index + 1;
   }
-  const id = randomUUID();
+  const id = crypto.randomUUID();
   const publicId = `${input.type}-${id.slice(0, 8)}`;
-  db.exec('BEGIN');
-  try {
-    db.prepare('UPDATE travel_events SET sort_order=sort_order+1 WHERE day_id=? AND sort_order>=?').run(input.dayId, position);
-    const timeSource = input.timeSource ?? (input.time ? 'manual' : 'photo');
-    db.prepare(`INSERT INTO travel_events
-      (id,public_id,day_id,type,title,time,time_source,note,location_lat,location_lng,location_address,data,sort_order)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, publicId, input.dayId, input.type, input.title,
-      timeSource === 'manual' ? input.time ?? null : null, timeSource, input.note ?? null, input.location?.lat ?? null, input.location?.lng ?? null,
-      input.location?.address ?? null, JSON.stringify(input.data ?? {}), position);
-    db.prepare(`UPDATE trips SET updated_at=date('now') WHERE id=(SELECT trip_id FROM trip_days WHERE id=?)`).run(input.dayId);
-    db.exec('COMMIT');
-  } catch (error) { db.exec('ROLLBACK'); throw error; }
+  const timeSource = input.timeSource ?? (input.time ? 'manual' : 'photo');
+  await database().batch([
+    prepared(
+      'UPDATE travel_events SET sort_order=sort_order+1 WHERE day_id=? AND sort_order>=?',
+      [input.dayId, position],
+    ),
+    prepared(
+      `INSERT INTO travel_events
+       (id,public_id,day_id,type,title,time,time_source,note,location_lat,location_lng,location_address,data,sort_order)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [
+        id, publicId, input.dayId, input.type, input.title,
+        timeSource === 'manual' ? input.time ?? null : null, timeSource, input.note ?? null,
+        input.location?.lat ?? null, input.location?.lng ?? null, input.location?.address ?? null,
+        JSON.stringify(input.data ?? {}), position,
+      ],
+    ),
+    prepared(
+      `UPDATE trips SET updated_at=date('now') WHERE id=(SELECT trip_id FROM trip_days WHERE id=?)`,
+      [input.dayId],
+    ),
+  ]);
   return id;
 }
 
-export function updateEvent(eventId: string, input: Omit<EventInput, 'dayId' | 'afterEventId'>) {
-  const db = getDatabase();
+export async function updateEvent(eventId: string, input: Omit<EventInput, 'dayId' | 'afterEventId'>) {
   const timeSource = input.timeSource ?? (input.time ? 'manual' : 'photo');
-  db.prepare(`UPDATE travel_events SET type=?,title=?,time=?,time_source=?,note=?,location_lat=?,location_lng=?,location_address=?,data=? WHERE id=?`)
-    .run(input.type, input.title, timeSource === 'manual' ? input.time ?? null : null, timeSource, input.note ?? null, input.location?.lat ?? null,
-      input.location?.lng ?? null, input.location?.address ?? null, JSON.stringify(input.data ?? {}), eventId);
-  if (timeSource === 'photo') syncEventTimeFromPhotos(eventId);
-  else touchTripForEvent(db, eventId);
+  await run(
+    `UPDATE travel_events SET type=?,title=?,time=?,time_source=?,note=?,location_lat=?,location_lng=?,location_address=?,data=? WHERE id=?`,
+    [
+      input.type, input.title, timeSource === 'manual' ? input.time ?? null : null,
+      timeSource, input.note ?? null, input.location?.lat ?? null, input.location?.lng ?? null,
+      input.location?.address ?? null, JSON.stringify(input.data ?? {}), eventId,
+    ],
+  );
+  if (timeSource === 'photo') await syncEventTimeFromPhotos(eventId);
+  else await touchTripForEvent(eventId);
 }
 
-export function deleteEvent(eventId: string) {
-  const db = getDatabase();
-  const row = db.prepare('SELECT day_id,sort_order FROM travel_events WHERE id=?').get(eventId) as
-    { day_id: string; sort_order: number } | undefined;
+export async function deleteEvent(eventId: string) {
+  const row = await first<{ day_id: string; sort_order: number }>(
+    'SELECT day_id,sort_order FROM travel_events WHERE id=?',
+    [eventId],
+  );
   if (!row) return;
-  db.exec('BEGIN');
-  try {
-    db.prepare('DELETE FROM travel_events WHERE id=?').run(eventId);
-    db.prepare('UPDATE travel_events SET sort_order=sort_order-1 WHERE day_id=? AND sort_order>?')
-      .run(row.day_id, row.sort_order);
-    db.prepare(`UPDATE trips SET updated_at=date('now') WHERE id=(SELECT trip_id FROM trip_days WHERE id=?)`).run(row.day_id);
-    db.exec('COMMIT');
-  } catch (error) { db.exec('ROLLBACK'); throw error; }
+  await database().batch([
+    prepared('DELETE FROM travel_events WHERE id=?', [eventId]),
+    prepared(
+      'UPDATE travel_events SET sort_order=sort_order-1 WHERE day_id=? AND sort_order>?',
+      [row.day_id, row.sort_order],
+    ),
+    prepared(
+      `UPDATE trips SET updated_at=date('now') WHERE id=(SELECT trip_id FROM trip_days WHERE id=?)`,
+      [row.day_id],
+    ),
+  ]);
 }
 
-export function addPhotoRecord(photo: Omit<TravelPhoto, 'createdAt'>) {
-  getDatabase().prepare(`INSERT INTO travel_photos
-    (id,event_id,original_path,variants,alt,caption,featured,taken_at,created_at) VALUES (?,?,?,?,?,?,?,?,?)`)
-    .run(photo.id, photo.eventId, photo.originalPath, JSON.stringify(photo.variants), photo.alt,
-      photo.caption ?? null, photo.featured ? 1 : 0, photo.takenAt ?? null, new Date().toISOString());
-  syncEventTimeFromPhotos(photo.eventId);
+export async function addPhotoRecord(photo: Omit<TravelPhoto, 'createdAt'>) {
+  await run(
+    `INSERT INTO travel_photos
+     (id,event_id,original_path,variants,alt,caption,featured,taken_at,created_at,sort_order)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    [
+      photo.id, photo.eventId, photo.originalPath, JSON.stringify(photo.variants), photo.alt,
+      photo.caption ?? null, photo.featured ? 1 : 0, photo.takenAt ?? null,
+      new Date().toISOString(), photo.sortOrder ?? null,
+    ],
+  );
+  await syncEventTimeFromPhotos(photo.eventId);
 }
 
-export function reorderEventPhotos(eventId: string, photoIds: string[]) {
-  const db = getDatabase();
-  const stmt = db.prepare('UPDATE travel_photos SET sort_order=? WHERE id=? AND event_id=?');
-  db.exec('BEGIN');
-  try {
-    photoIds.forEach((id, index) => stmt.run(index + 1, id, eventId));
-    db.exec('COMMIT');
-  } catch (error) { db.exec('ROLLBACK'); throw error; }
+export async function reorderEventPhotos(eventId: string, photoIds: string[]) {
+  if (!photoIds.length) return;
+  await database().batch(photoIds.map((id, index) => prepared(
+    'UPDATE travel_photos SET sort_order=? WHERE id=? AND event_id=?',
+    [index + 1, id, eventId],
+  )));
 }
 
-export function getEventContext(eventId: string) {
-  return getDatabase().prepare(`SELECT e.id,e.public_id,e.day_id,d.trip_id
-    FROM travel_events e JOIN trip_days d ON d.id=e.day_id WHERE e.id=?`).get(eventId) as
-    { id: string; public_id: string; day_id: string; trip_id: string } | undefined;
+export async function getEventContext(eventId: string) {
+  return first<{ id: string; public_id: string; day_id: string; trip_id: string }>(
+    `SELECT e.id,e.public_id,e.day_id,d.trip_id
+     FROM travel_events e JOIN trip_days d ON d.id=e.day_id WHERE e.id=?`,
+    [eventId],
+  );
 }
 
-export function getPhoto(photoId: string) {
-  const row = getDatabase().prepare('SELECT * FROM travel_photos WHERE id=?').get(photoId) as Row | undefined;
+export async function getPhoto(photoId: string) {
+  const row = await first('SELECT * FROM travel_photos WHERE id=?', [photoId]);
   return row ? rowToPhoto(row) : undefined;
 }
 
-export function listEventPhotos(eventId: string) {
-  return (getDatabase().prepare('SELECT * FROM travel_photos WHERE event_id=? ORDER BY sort_order IS NULL, sort_order, taken_at IS NULL, taken_at, created_at').all(eventId) as Row[]).map(rowToPhoto);
+export async function listEventPhotos(eventId: string) {
+  return (await all(
+    `SELECT * FROM travel_photos WHERE event_id=?
+     ORDER BY sort_order IS NULL, sort_order, taken_at IS NULL, taken_at, created_at`,
+    [eventId],
+  )).map(rowToPhoto);
 }
 
-export function deletePhotoRecord(photoId: string) {
-  const db = getDatabase();
-  const photo = db.prepare('SELECT event_id FROM travel_photos WHERE id=?').get(photoId) as Row | undefined;
-  db.prepare('DELETE FROM travel_photos WHERE id=?').run(photoId);
-  if (photo) syncEventTimeFromPhotos(String(photo.event_id));
+export async function deletePhotoRecord(photoId: string) {
+  const photo = await first('SELECT event_id FROM travel_photos WHERE id=?', [photoId]);
+  await run('DELETE FROM travel_photos WHERE id=?', [photoId]);
+  if (photo) await syncEventTimeFromPhotos(String(photo.event_id));
+}
+
+function rowToCityPhoto(row: Row): CityPhoto {
+  return {
+    id: String(row.id),
+    placeId: String(row.place_id),
+    originalPath: String(row.original_path),
+    variants: JSON.parse(String(row.variants)),
+    alt: String(row.alt),
+    caption: row.caption ? String(row.caption) : undefined,
+    featured: Boolean(row.featured),
+    createdAt: String(row.created_at),
+    sortOrder: row.sort_order == null ? null : Number(row.sort_order),
+  };
+}
+
+function rowToCityPlace(row: Row, photos: CityPhoto[]): CityPlace {
+  return {
+    id: String(row.id),
+    city: String(row.city) as CitySlug,
+    name: String(row.name),
+    type: String(row.type),
+    district: row.district ? String(row.district) : undefined,
+    lat: Number(row.lat),
+    lng: Number(row.lng),
+    note: row.note ? String(row.note) : undefined,
+    sortOrder: Number(row.sort_order),
+    draft: Boolean(row.draft),
+    updatedAt: String(row.updated_at),
+    photos: photos.filter((photo) => photo.placeId === row.id),
+  };
+}
+
+export async function listCityPlaces(includeDrafts = false): Promise<CityPlace[]> {
+  const [rows, photoRows] = await Promise.all([
+    all(`SELECT * FROM city_places ${includeDrafts ? '' : 'WHERE draft=0'} ORDER BY city,sort_order,name`),
+    all(
+      `SELECT p.* FROM city_photos p JOIN city_places c ON c.id=p.place_id
+       ${includeDrafts ? '' : 'WHERE c.draft=0'}
+       ORDER BY p.featured DESC,p.sort_order IS NULL,p.sort_order,p.created_at`,
+    ),
+  ]);
+  const photos = photoRows.map(rowToCityPhoto);
+  return rows.map((row) => rowToCityPlace(row, photos));
+}
+
+export async function getCityPlace(id: string, includeDrafts = false): Promise<CityPlace | undefined> {
+  const [row, photoRows] = await Promise.all([
+    first(`SELECT * FROM city_places WHERE id=? ${includeDrafts ? '' : 'AND draft=0'}`, [id]),
+    all(
+      `SELECT * FROM city_photos WHERE place_id=?
+       ORDER BY featured DESC,sort_order IS NULL,sort_order,created_at`,
+      [id],
+    ),
+  ]);
+  return row ? rowToCityPlace(row, photoRows.map(rowToCityPhoto)) : undefined;
+}
+
+export async function getCityPlaceByRoute(city: string, id: string, includeDrafts = false) {
+  const place = await getCityPlace(id, includeDrafts);
+  return place?.city === city ? place : undefined;
+}
+
+export interface CityPlaceInput {
+  id?: string;
+  city: CitySlug;
+  name: string;
+  type: string;
+  district?: string;
+  lat: number;
+  lng: number;
+  note?: string;
+  draft?: boolean;
+}
+
+export async function createCityPlace(input: CityPlaceInput) {
+  if (!input.id) throw new Error('INVALID_INPUT');
+  const count = await first('SELECT COUNT(*) AS count FROM city_places WHERE city=?', [input.city]);
+  await run(
+    `INSERT INTO city_places
+     (id,city,name,type,district,lat,lng,note,sort_order,draft,updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+    [
+      input.id, input.city, input.name, input.type, input.district ?? null,
+      input.lat, input.lng, input.note ?? null, Number(count?.count),
+      input.draft ? 1 : 0, new Date().toISOString(),
+    ],
+  );
+  return input.id;
+}
+
+export async function updateCityPlace(id: string, input: CityPlaceInput) {
+  await run(
+    `UPDATE city_places SET city=?,name=?,type=?,district=?,lat=?,lng=?,note=?,draft=?,updated_at=? WHERE id=?`,
+    [
+      input.city, input.name, input.type, input.district ?? null, input.lat, input.lng,
+      input.note ?? null, input.draft ? 1 : 0, new Date().toISOString(), id,
+    ],
+  );
+}
+
+export async function deleteCityPlace(id: string) {
+  await run('DELETE FROM city_places WHERE id=?', [id]);
+}
+
+export async function listCityPlacePhotoIds(placeId: string) {
+  return (await all('SELECT id FROM city_photos WHERE place_id=?', [placeId])).map((row) => String(row.id));
+}
+
+export async function addCityPhotoRecord(photo: Omit<CityPhoto, 'createdAt'>) {
+  const count = await first('SELECT COUNT(*) AS count FROM city_photos WHERE place_id=?', [photo.placeId]);
+  await run(
+    `INSERT INTO city_photos
+     (id,place_id,original_path,variants,alt,caption,featured,created_at,sort_order)
+     VALUES (?,?,?,?,?,?,?,?,?)`,
+    [
+      photo.id, photo.placeId, photo.originalPath, JSON.stringify(photo.variants), photo.alt,
+      photo.caption ?? null, Number(count?.count) === 0 || photo.featured ? 1 : 0,
+      new Date().toISOString(), Number(count?.count) + 1,
+    ],
+  );
+}
+
+export async function getCityPlaceContext(placeId: string) {
+  return first<{ id: string; city: string; name: string }>(
+    'SELECT id,city,name FROM city_places WHERE id=?',
+    [placeId],
+  );
+}
+
+export async function getCityPhoto(photoId: string) {
+  const row = await first('SELECT * FROM city_photos WHERE id=?', [photoId]);
+  return row ? rowToCityPhoto(row) : undefined;
+}
+
+export async function deleteCityPhotoRecord(photoId: string) {
+  const photo = await first('SELECT place_id,featured FROM city_photos WHERE id=?', [photoId]);
+  if (!photo) return;
+  const next = photo.featured
+    ? await first(
+        `SELECT id FROM city_photos WHERE place_id=? AND id<>?
+         ORDER BY sort_order IS NULL,sort_order,created_at LIMIT 1`,
+        [String(photo.place_id), photoId],
+      )
+    : undefined;
+  await database().batch([
+    prepared('DELETE FROM city_photos WHERE id=?', [photoId]),
+    ...(next ? [prepared('UPDATE city_photos SET featured=1 WHERE id=?', [String(next.id)])] : []),
+  ]);
+}
+
+export async function reorderCityPhotos(placeId: string, photoIds: string[]) {
+  if (!photoIds.length) return;
+  await database().batch(photoIds.map((id, index) => prepared(
+    'UPDATE city_photos SET sort_order=? WHERE id=? AND place_id=?',
+    [index + 1, id, placeId],
+  )));
+}
+
+export async function setCityCoverPhoto(placeId: string, photoId: string) {
+  const photo = await first('SELECT id FROM city_photos WHERE id=? AND place_id=?', [photoId, placeId]);
+  if (!photo) return false;
+  await database().batch([
+    prepared('UPDATE city_photos SET featured=0 WHERE place_id=?', [placeId]),
+    prepared('UPDATE city_photos SET featured=1 WHERE id=?', [photoId]),
+  ]);
+  return true;
 }

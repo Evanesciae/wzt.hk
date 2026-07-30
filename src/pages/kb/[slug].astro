@@ -5,7 +5,7 @@ import { categoryTitle, formatDate } from '../../lib/content';
 import { getKbNote } from '../../server/database';
 
 const slug = Astro.params.slug;
-const note = slug ? getKbNote(slug) : undefined;
+const note = slug ? await getKbNote(slug) : undefined;
 if (!note) return Astro.redirect('/404');
 const date = (value: string) => new Date(`${value}T00:00:00`);
 const bodyHtml = note.body ? marked.parse(note.body) : '';

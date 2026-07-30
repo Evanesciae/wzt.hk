@@ -1,6 +1,6 @@
 # wzt.hk
 
-一个可自托管的私人入口网站，用于管理知识笔记、旅行计划和常用链接。知识库与链接使用 Markdown / JSON；Travel 使用 SQLite 和服务器图片存储，并提供受保护的网页管理端。
+一个运行于 Cloudflare Workers 的私人入口网站，用于管理知识笔记、旅行计划、航班、城市和常用链接。动态数据保存在 D1，照片原图保存在 R2，并通过 Cloudflare Images 按需生成网页版本。
 
 ## Project conventions
 
@@ -17,39 +17,18 @@ data/media/
 backups/
 ```
 
-Use GitHub for source code and use SSH/rsync for server data.
-
-Configure the server in `.env`:
-
-```env
-SYNC_HOST=example.com
-SYNC_USER=wzt
-SYNC_PORT=22
-SYNC_PATH=/var/www/wzt.hk
-```
-
-Pull production data to local:
-
-```bash
-npm run data:pull
-```
-
-Push local data to the server:
-
-```bash
-npm run data:push
-```
-
-Both scripts create a SQLite backup before replacing the database. Media files are synchronized with `rsync --delete`, so the target mirrors the source.
+Use GitHub for source code and migrations. Cloudflare D1 and R2 are the deployed runtime data stores; back them up separately. The local `data/` directory is retained as an import and recovery source.
 
 ## 本地运行
 
 ```bash
 npm install
 npm run admin:password -- "用于本地测试的长密码"
+npm run cf:migrate:local
+npm run cf:dev
 ```
 
-将生成结果填入 `.env` 的 `ADMIN_PASSWORD_HASH`，再运行 `npm run dev`。管理端位于 `/admin`。
+将生成结果填入 `.dev.vars` 的 `ADMIN_PASSWORD_HASH`。管理端位于 `/admin`。
 
 提交或部署前运行：
 
@@ -58,15 +37,15 @@ npm run check
 npm run build
 ```
 
-服务端构建位于 `dist/`，通过 `npm start` 运行。生产部署见 [DEPLOYMENT.md](./DEPLOYMENT.md)。
+服务端构建位于 `dist/`，通过 Cloudflare Workers 发布。部署流程见 [DEPLOYMENT.md](./DEPLOYMENT.md)。
 
 ## 内容位置
 
 ```text
 src/content/kb/       知识库 Markdown
 src/content/travel/   旅行种子内容（首次初始化数据库）
-data/wzt.db           运行时 Travel 数据库（不提交 Git）
-data/media/           原图与网页图片（不提交 Git）
+data/wzt.db           本地迁移/恢复用 SQLite（不提交 Git）
+data/media/           本地迁移/恢复用照片（不提交 Git）
 src/data/links.json   常用链接
 src/data/kb-categories.json  知识库分类
 src/data/site.json    站点基础信息

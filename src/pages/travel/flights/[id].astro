@@ -2,15 +2,11 @@
 import BaseLayout from '../../../layouts/BaseLayout.astro';
 import FlightMap from '../../../components/FlightMap.astro';
 import { getFlight } from '../../../server/database';
-import { formatDate } from '../../../lib/content';
+import { formatFlightDate } from '../../../lib/content';
 
 const id = Astro.params.id;
-const flight = id ? getFlight(id) : undefined;
+const flight = id ? await getFlight(id) : undefined;
 if (!flight) return Astro.redirect('/404');
-
-function date(value: string) {
-  return new Date(`${value.slice(0, 10)}T00:00:00`);
-}
 
 function time(value?: string) {
   return value ? value.slice(11, 16) : '—';
@@ -24,13 +20,13 @@ function duration(minutes?: number) {
 }
 ---
 
-<BaseLayout title={`${flight.flightNumber} · 飞行日记`}>
+<BaseLayout title={`${flight.flightNumber || '航班待确认'} · 飞行日记`}>
   <div class="container trip-page-shell">
     <a href="/travel/flights/" class="back-link">← 飞行日记</a>
     <header class="article-header">
       <p class="eyebrow">{flight.airlineName ?? flight.airlineCode ?? 'FLIGHT'}</p>
       <h1>{flight.fromAirport.code} → {flight.toAirport.code}</h1>
-      <p>{flight.flightNumber} · {formatDate(date(flight.date))}</p>
+      <p>{flight.flightNumber || '航班待确认'} · {formatFlightDate(flight.date, flight.datePrecision)}</p>
     </header>
 
     <section class="flight-detail-grid">

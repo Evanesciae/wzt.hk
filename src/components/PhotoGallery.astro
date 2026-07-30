@@ -11,16 +11,20 @@ const prepared = photos.map((photo) => {
   const variants = [...photo.variants].sort((a, b) => a.width - b.width);
   return { ...photo, thumb: variants[Math.min(1, variants.length - 1)], full: variants.at(-1), variants };
 });
+const photoItems = prepared.map((photo) => ({
+  src: photo.full ? `/media/${photo.full.path}` : '',
+  alt: photo.alt,
+  caption: photo.caption ?? `${photo.dateLabel} · ${photo.eventTitle}`,
+}));
 ---
 
-<div class="photo-gallery" data-photo-gallery>
+<div class="photo-gallery" data-photo-gallery data-photo-items={JSON.stringify(photoItems)}>
   {prepared.map((photo, index) => (
     <button
       class:list={['gallery-photo', index === 0 && 'gallery-photo-featured']}
       type="button"
-      data-photo-src={photo.full ? `/media/${photo.full.path}` : ''}
-      data-photo-alt={photo.alt}
-      data-photo-caption={photo.caption ?? `${photo.dateLabel} · ${photo.eventTitle}`}
+      data-photo-index={index}
+      aria-label={`查看照片：${photo.alt}`}
     >
       {photo.thumb && <img
         src={`/media/${photo.thumb.path}`}
@@ -31,26 +35,16 @@ const prepared = photos.map((photo) => {
   ))}
   <dialog class="photo-dialog" data-photo-dialog>
     <button type="button" class="dialog-close" data-dialog-close aria-label="关闭照片">×</button>
-    <img data-dialog-image alt="" />
-    <p data-dialog-caption></p>
+    <div class="photo-dialog-stage">
+      <button type="button" class="photo-dialog-nav photo-dialog-previous" data-dialog-previous aria-label="上一张照片"><span aria-hidden="true">‹</span></button>
+      <img data-dialog-image alt="" />
+      <button type="button" class="photo-dialog-nav photo-dialog-next" data-dialog-next aria-label="下一张照片"><span aria-hidden="true">›</span></button>
+    </div>
+    <footer class="photo-dialog-meta"><p data-dialog-caption></p><span data-dialog-counter></span></footer>
   </dialog>
 </div>
 
 <script>
-  document.querySelectorAll<HTMLElement>('[data-photo-gallery]').forEach((gallery) => {
-    const dialog = gallery.querySelector<HTMLDialogElement>('[data-photo-dialog]');
-    const image = dialog?.querySelector<HTMLImageElement>('[data-dialog-image]');
-    const caption = dialog?.querySelector<HTMLElement>('[data-dialog-caption]');
-    gallery.querySelectorAll<HTMLButtonElement>('[data-photo-src]').forEach((button) => {
-      button.addEventListener('click', () => {
-        if (!dialog || !image) return;
-        image.src = button.dataset.photoSrc ?? '';
-        image.alt = button.dataset.photoAlt ?? '';
-        if (caption) caption.textContent = button.dataset.photoCaption ?? '';
-        dialog.showModal();
-      });
-    });
-    dialog?.querySelector<HTMLButtonElement>('[data-dialog-close]')?.addEventListener('click', () => dialog.close());
-    dialog?.addEventListener('click', (event) => { if (event.target === dialog) dialog.close(); });
-  });
+  import { setupPhotoLightboxes } from '../lib/photo-lightbox';
+  setupPhotoLightboxes();
 </script>

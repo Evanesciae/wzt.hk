@@ -9,7 +9,7 @@ export const POST: APIRoute = async ({ request }) => {
     return Response.json({ error: 'INVALID_AIRPORT' }, { status: 422 });
   }
   try {
-    const code = upsertAirport({
+    const code = await upsertAirport({
       code: String(body.code).trim().toUpperCase(),
       icao: body.icao ? String(body.icao).trim().toUpperCase() : undefined,
       name: String(body.name).trim(),

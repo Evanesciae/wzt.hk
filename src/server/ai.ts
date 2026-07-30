@@ -1,12 +1,25 @@
-const AI_API_KEY = process.env.AI_API_KEY;
-const AI_BASE_URL = process.env.AI_BASE_URL || 'https://api.deepseek.com';
-const AI_MODEL = process.env.AI_MODEL || 'deepseek-chat';
+import { env } from 'cloudflare:workers';
+
+type AiBindings = {
+  AI_API_KEY?: string;
+  AI_BASE_URL?: string;
+  AI_MODEL?: string;
+};
+
+function bindings() {
+  return env as unknown as AiBindings;
+}
 
 export class AiNotConfiguredError extends Error {}
 
 interface ChatMessage { role: 'system' | 'user' | 'assistant'; content: string }
 
 async function aiChat(messages: ChatMessage[], options: { json?: boolean } = {}): Promise<string> {
+  const {
+    AI_API_KEY,
+    AI_BASE_URL = 'https://api.deepseek.com',
+    AI_MODEL = 'deepseek-chat',
+  } = bindings();
   if (!AI_API_KEY) throw new AiNotConfiguredError('AI_NOT_CONFIGURED');
   const res = await fetch(`${AI_BASE_URL}/v1/chat/completions`, {
     method: 'POST',

@@ -18,6 +18,6 @@ export const POST: APIRoute = async ({ request }) => {
     timeSource: timeSource(body),
     note: body.note || undefined, location: parseLocation(body), data: body.data && typeof body.data === 'object' ? body.data : {},
   };
-  try { return Response.json({ ok: true, id: createEvent(input) }, { status: 201 }); }
+  try { return Response.json({ ok: true, id: await createEvent(input) }, { status: 201 }); }
   catch (error) { console.error(error); return Response.json({ error: 'CREATE_FAILED' }, { status: 500 }); }
 };

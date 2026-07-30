@@ -7,29 +7,31 @@
     "node": ">=24.0.0"
   },
   "scripts": {
-    "dev": "ASTRO_TELEMETRY_DISABLED=1 node --env-file-if-exists=.env ./node_modules/astro/bin/astro.mjs dev",
+    "dev": "ASTRO_TELEMETRY_DISABLED=1 astro dev",
     "build": "ASTRO_TELEMETRY_DISABLED=1 astro build",
-    "start": "node ./dist/server/entry.mjs",
     "preview": "ASTRO_TELEMETRY_DISABLED=1 astro preview",
+    "cf:dev": "wrangler dev",
+    "cf:types": "CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false wrangler types --include-runtime false",
+    "cf:migrate:local": "wrangler d1 migrations apply DB --local",
+    "cf:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "cf:upload-media": "node ./scripts/upload-r2-media.mjs",
+    "cf:set-admin-password": "bash ./scripts/set-admin-password.sh",
+    "cf:deploy": "CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false npm run build && CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false wrangler deploy",
     "admin:password": "node ./scripts/hash-password.mjs",
-    "backup": "sh ./scripts/backup.sh",
-    "data:pull": "sh ./scripts/pull-data.sh",
-    "data:push": "sh ./scripts/push-data.sh",
     "check": "ASTRO_TELEMETRY_DISABLED=1 astro check"
   },
   "dependencies": {
-    "@astrojs/node": "^10.1.4",
-    "@node-rs/argon2": "^2.0.2",
-    "astro": "^6.0.0",
-    "exifr": "^7.1.3",
+    "@astrojs/cloudflare": "^14.1.7",
+    "astro": "^7.1.6",
     "maplibre-gl": "^5.24.0",
     "marked": "^18.0.5",
-    "sharp": "^0.35.3",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.6",
+    "@cloudflare/workers-types": "^5.20260730.1",
     "@types/node": "^26.1.0",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "wrangler": "^4.115.0"
   }
 }

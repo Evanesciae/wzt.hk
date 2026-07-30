@@ -28,3 +28,10 @@ export function formatDateRange(start: Date, end: Date) {
     : { year: 'numeric', month: 'short', day: 'numeric' });
   return `${startText} — ${endText}`;
 }
+
+export function formatFlightDate(value: string, precision: 'day' | 'month' = 'day') {
+  const parsed = new Date(`${value.slice(0, 10)}T00:00:00`);
+  return formatDate(parsed, precision === 'month'
+    ? { year: 'numeric', month: 'long' }
+    : undefined);
+}

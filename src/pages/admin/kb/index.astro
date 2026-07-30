@@ -3,7 +3,7 @@ import BaseLayout from '../../../layouts/BaseLayout.astro';
 import { listKbNotes } from '../../../server/database';
 import { kbCategories, categoryTitle } from '../../../lib/content';
 
-const notes = listKbNotes(true);
+const notes = await listKbNotes(true);
 ---
 
 <BaseLayout title="知识库管理">

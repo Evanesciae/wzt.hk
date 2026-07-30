@@ -2,7 +2,7 @@
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import { listAirports } from '../../server/database';
 
-const airports = listAirports();
+const airports = await listAirports();
 ---
 
 <BaseLayout title="机场管理">

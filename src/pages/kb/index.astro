@@ -5,7 +5,7 @@ import KbCard from '../../components/KbCard.astro';
 import { kbCategories } from '../../lib/content';
 import { listKbNotes } from '../../server/database';
 
-const notes = listKbNotes();
+const notes = await listKbNotes();
 ---
 
 <BaseLayout title="知识库" description="私人笔记、方法与参考资料。">

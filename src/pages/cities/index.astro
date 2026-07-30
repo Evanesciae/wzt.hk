@@ -1,0 +1,16 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PageHeader from '../../components/PageHeader.astro';
+import CityExplorer from '../../components/CityExplorer.astro';
+import { cities } from '../../data/cities';
+import { listCityPlaces } from '../../server/database';
+
+const places = await listCityPlaces();
+---
+
+<BaseLayout title="城市探索">
+  <div class="container page-shell city-page">
+    <PageHeader eyebrow="CITY EXPLORATION" title="城市探索" count={places.length} />
+    <CityExplorer cities={cities} places={places} />
+  </div>
+</BaseLayout>

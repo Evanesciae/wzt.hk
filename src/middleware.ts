@@ -8,7 +8,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
   const isLoginApi = path === '/api/admin/login';
   if (!isAdminPage && !isAdminApi) return next();
 
-  const session = getSession(context.cookies);
+  const session = await getSession(context.cookies);
   if (session) context.locals.adminSession = session;
   if (!session && !isLoginApi) {
     if (isAdminApi) return Response.json({ error: 'UNAUTHORIZED' }, { status: 401 });
@@ -22,4 +22,3 @@ export const onRequest = defineMiddleware(async (context, next) => {
   }
   return next();
 });
-

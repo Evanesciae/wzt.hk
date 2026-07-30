@@ -8,6 +8,6 @@ export const PUT: APIRoute = async ({ params, request }) => {
   try { body = await request.json(); } catch { return Response.json({ error: 'BAD_REQUEST' }, { status: 400 }); }
   const photoIds = Array.isArray(body.photoIds) ? body.photoIds.filter((id): id is string => typeof id === 'string') : [];
   if (photoIds.length === 0) return Response.json({ error: 'INVALID_ORDER' }, { status: 422 });
-  reorderEventPhotos(eventId, photoIds);
+  await reorderEventPhotos(eventId, photoIds);
   return Response.json({ ok: true });
 };
