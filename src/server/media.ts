@@ -5,7 +5,16 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
 import sharp from 'sharp';
-import { addPhotoRecord, deletePhotoRecord, getEventContext, getPhoto } from './database';
+import {
+  addCityPhotoRecord,
+  addPhotoRecord,
+  deleteCityPhotoRecord,
+  deletePhotoRecord,
+  getCityPhoto,
+  getCityPlaceContext,
+  getEventContext,
+  getPhoto,
+} from './database';
 import type { PhotoVariant } from './types';
 
 const require = createRequire(import.meta.url);
@@ -60,24 +69,33 @@ async function sharpInput(originalPath: string, ext: string, tempPath: string) {
   }
 }
 
-export async function processUpload(
-  eventId: string,
+interface ProcessedImage {
+  id: string;
+  originalPath: string;
+  variants: PhotoVariant[];
+  alt: string;
+  caption?: string;
+  featured: boolean;
+  takenAt?: string;
+}
+
+async function processImageUpload(
+  groupName: string,
+  itemName: string,
   file: File,
   alt: string,
   caption?: string,
   onProgress?: (progress: UploadProgress) => void,
-) {
-  const context = getEventContext(eventId);
-  if (!context) throw new Error('EVENT_NOT_FOUND');
+): Promise<ProcessedImage> {
   if (file.size === 0 || file.size > MAX_UPLOAD) throw new Error('INVALID_FILE_SIZE');
   const ext = extension(file);
   if (!ext) throw new Error('UNSUPPORTED_FILE_TYPE');
 
   const photoId = randomUUID();
-  const trip = safeSegment(context.trip_id);
-  const event = safeSegment(context.public_id);
-  const originalDir = join(dataRoot, 'originals', trip, event);
-  const publicDir = join(dataRoot, 'public', trip, event);
+  const group = safeSegment(groupName);
+  const item = safeSegment(itemName);
+  const originalDir = join(dataRoot, 'originals', group, item);
+  const publicDir = join(dataRoot, 'public', group, item);
   await mkdir(originalDir, { recursive: true });
   await mkdir(publicDir, { recursive: true });
   const originalPath = join(originalDir, `${photoId}${ext}`);
@@ -116,7 +134,7 @@ export async function processUpload(
         .jpeg({ quality: 90, chromaSubsampling: '4:4:4', progressive: true, optimiseCoding: true })
         .timeout({ seconds: 120 })
         .toFile(outputPath);
-      variants.push({ width: info.width, height: info.height, size: info.size, path: `${trip}/${event}/${filename}` });
+      variants.push({ width: info.width, height: info.height, size: info.size, path: `${group}/${item}/${filename}` });
       onProgress?.({
         stage: 'resizing', percent: 10 + Math.round(((index + 1) / widths.length) * 85),
         width, variant: index + 1, totalVariants: widths.length,
@@ -124,12 +142,16 @@ export async function processUpload(
     }
     if (inputPath === tempPath) await rm(tempPath, { force: true });
     const resolvedAlt = alt || file.name.replace(extname(file.name), '');
-    addPhotoRecord({
-      id: photoId, eventId, originalPath: `${trip}/${event}/${photoId}${ext}`,
-      variants, alt: resolvedAlt, caption, featured: false, takenAt,
-    });
     onProgress?.({ stage: 'complete', percent: 100 });
-    return { id: photoId, eventId, originalPath: `${trip}/${event}/${photoId}${ext}`, variants, alt: resolvedAlt, caption, featured: false, takenAt };
+    return {
+      id: photoId,
+      originalPath: `${group}/${item}/${photoId}${ext}`,
+      variants,
+      alt: resolvedAlt,
+      caption,
+      featured: false,
+      takenAt,
+    };
   } catch (error) {
     await Promise.all([
       rm(originalPath, { force: true }),
@@ -138,6 +160,35 @@ export async function processUpload(
     ]);
     throw error;
   }
+}
+
+export async function processUpload(
+  eventId: string,
+  file: File,
+  alt: string,
+  caption?: string,
+  onProgress?: (progress: UploadProgress) => void,
+) {
+  const context = getEventContext(eventId);
+  if (!context) throw new Error('EVENT_NOT_FOUND');
+  const image = await processImageUpload(context.trip_id, context.public_id, file, alt, caption, onProgress);
+  addPhotoRecord({ ...image, eventId });
+  return { ...image, eventId };
+}
+
+export async function processCityUpload(
+  placeId: string,
+  file: File,
+  alt: string,
+  caption?: string,
+  onProgress?: (progress: UploadProgress) => void,
+) {
+  const context = getCityPlaceContext(placeId);
+  if (!context) throw new Error('PLACE_NOT_FOUND');
+  const image = await processImageUpload(`cities-${context.city}`, context.id, file, alt, caption, onProgress);
+  const { takenAt: _takenAt, ...cityImage } = image;
+  addCityPhotoRecord({ ...cityImage, placeId });
+  return { ...cityImage, placeId };
 }
 
 export function publicMediaPath(relative: string) {
@@ -153,5 +204,14 @@ export async function deletePhotoFiles(photoId: string) {
   await rm(join(dataRoot, 'originals', photo.originalPath), { force: true });
   await Promise.all(photo.variants.map((variant) => rm(join(dataRoot, 'public', variant.path), { force: true })));
   deletePhotoRecord(photoId);
+  return true;
+}
+
+export async function deleteCityPhotoFiles(photoId: string) {
+  const photo = getCityPhoto(photoId);
+  if (!photo) return false;
+  await rm(join(dataRoot, 'originals', photo.originalPath), { force: true });
+  await Promise.all(photo.variants.map((variant) => rm(join(dataRoot, 'public', variant.path), { force: true })));
+  deleteCityPhotoRecord(photoId);
   return true;
 }

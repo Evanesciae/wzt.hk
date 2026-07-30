@@ -1,0 +1,46 @@
+---
+import { marked } from 'marked';
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import CityPhotoGallery from '../../../components/CityPhotoGallery.astro';
+import CityPlaceMap from '../../../components/CityPlaceMap.astro';
+import { cityName } from '../../../data/cities';
+import { getCityPlaceByRoute } from '../../../server/database';
+import { getSession } from '../../../server/auth';
+
+const city = Astro.params.city;
+const slug = Astro.params.slug;
+const place = city && slug ? getCityPlaceByRoute(city, slug) : undefined;
+if (!place) return Astro.redirect('/404');
+const admin = getSession(Astro.cookies);
+const noteHtml = place.note ? marked.parse(place.note) : '';
+---
+
+<BaseLayout title={place.name}>
+  <div class="container city-detail-shell">
+    <div class="trip-top-actions">
+      <a class="back-link" href={`/cities/?city=${place.city}`}>← 返回城市</a>
+      {admin && <a class="admin-edit-link" href={`/admin/cities#${place.id}`}>编辑地点</a>}
+    </div>
+
+    <header class="article-header city-place-header">
+      <p class="eyebrow">{cityName(place.city)}</p>
+      <h1>{place.name}</h1>
+      <div class="city-place-meta">
+        <span>{place.type}</span>
+        {place.district && <span>{place.district}</span>}
+        <span>{place.photos.length} 张照片</span>
+      </div>
+    </header>
+
+    {place.photos.length > 0 && (
+      <section class="city-detail-gallery">
+        <CityPhotoGallery photos={place.photos} />
+      </section>
+    )}
+
+    <div class="city-detail-lower">
+      {noteHtml && <article class="prose city-place-note" set:html={noteHtml} />}
+      <CityPlaceMap name={place.name} lat={place.lat} lng={place.lng} />
+    </div>
+  </div>
+</BaseLayout>

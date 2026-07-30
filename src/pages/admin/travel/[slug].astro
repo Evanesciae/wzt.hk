@@ -10,7 +10,7 @@ const csrf = Astro.locals.adminSession?.csrfToken ?? '';
 const typeLabels = { place: '地点', transit: '交通', meal: '餐饮', stay: '住宿', note: '事件' } as const;
 const firstLocation = trip.days.flatMap((day) => day.events).find((event) => event.location)?.location;
 const geoDefault = firstLocation ? [firstLocation.lng, firstLocation.lat] : [114.17, 22.32];
-const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination, status: trip.status, startDate: trip.startDate, endDate: trip.endDate, summary: trip.summary, body: trip.body, pendingItems: trip.pendingItems, draft: trip.draft, featured: trip.featured };
+const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination, status: trip.status, startDate: trip.startDate, endDate: trip.endDate, datesTbd: trip.datesTbd, summary: trip.summary, body: trip.body, pendingItems: trip.pendingItems, draft: trip.draft, featured: trip.featured };
 ---
 
 <BaseLayout title={`编辑 ${trip.title}`}>
@@ -25,10 +25,10 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
     </header>
 
     <div class="admin-days" data-day-list>
-      <button class="timeline-insert" type="button" data-add-day><span>＋</span><em>添加日期</em></button>
+      <button class="timeline-insert day-insert" type="button" data-add-day><span>＋</span><em>添加日期</em></button>
       {trip.days.map((day, dayIndex) => (
         <section class="admin-day" data-day-id={day.id} data-day={JSON.stringify({ id: day.id, date: day.date, city: day.city, title: day.title, summary: day.summary })}>
-          <header class="admin-day-header" draggable="true" data-day-drag={day.id}><span class="admin-day-number">{String(dayIndex + 1).padStart(2, '0')}</span><div><time>{day.date}</time><h2>{day.title ?? day.city}</h2><p>{day.city}</p></div><div class="admin-day-actions"><button type="button" class="text-button" data-edit-day>编辑</button><button type="button" class="text-button" data-delete-day>删除</button></div></header>
+          <header class="admin-day-header" draggable="true" data-day-drag={day.id}><span class="admin-day-number">{String(dayIndex + 1).padStart(2, '0')}</span><div>{trip.datesTbd ? <span class="day-date-tbd">Day {dayIndex + 1}</span> : <time>{day.date}</time>}<h2>{day.title ?? day.city}</h2><p>{day.city}</p></div><div class="admin-day-actions"><button type="button" class="text-button" data-edit-day>编辑</button><button type="button" class="text-button" data-delete-day>删除</button></div></header>
           <button class="timeline-insert" type="button" data-add-event data-day-id={day.id} data-after="__start__"><span>＋</span><em>添加模块</em></button>
           <div class="admin-event-list">
             {day.events.map((event) => (
@@ -66,6 +66,7 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
           </div>
         </section>
       ))}
+      <button class="timeline-insert day-insert" type="button" data-add-day><span>＋</span><em>添加下一天</em></button>
     </div>
   </div>
 
@@ -121,8 +122,9 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
         <label class="full">标题<input name="title" required maxlength="120" /></label>
         <label>目的地<input name="destination" required /></label>
         <label>状态<select name="status"><option value="planning">计划中</option><option value="upcoming">即将出发</option><option value="archived">已归档</option></select></label>
-        <label>开始日期<input name="startDate" type="date" required /></label>
-        <label>结束日期<input name="endDate" type="date" required /></label>
+        <label class="full form-check-inline"><input name="datesTbd" type="checkbox" /><span>日期待定（只按 Day 顺序规划）</span></label>
+        <label data-trip-date-field>开始日期<input name="startDate" type="date" required /></label>
+        <label data-trip-date-field>结束日期<input name="endDate" type="date" required /></label>
         <label class="full">摘要<input name="summary" required /></label>
         <label class="full">整体信息（Markdown）<textarea name="body" rows="8"></textarea>
           <div class="ai-assist"><span>AI</span><button type="button" data-ai="polish" data-ai-target="body">润色</button><button type="button" data-ai="expand" data-ai-target="body">扩写</button><button type="button" data-ai="title-summary" data-ai-target="body">生成标题摘要</button></div>
@@ -143,7 +145,7 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
       <header><div><p class="eyebrow">TRAVEL DAY</p><h2 data-day-dialog-title>添加日期</h2></div><button type="button" data-dialog-close>×</button></header>
       <input type="hidden" name="dayId" />
       <div class="form-grid">
-        <label>日期<input name="date" type="date" required /></label>
+        <label data-day-date-field>日期<input name="date" type="date" required /></label>
         <label>城市<input name="city" required /></label>
         <label class="full">标题（可选，默认用城市）<input name="title" /></label>
         <label class="full">摘要（可选）<textarea name="summary" rows="3"></textarea></label>
@@ -313,10 +315,20 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
   const tripDialog = document.querySelector('[data-trip-dialog]');
   const tripForm = tripDialog?.querySelector('[data-trip-form]');
   const tripError = tripDialog?.querySelector('[data-trip-error]');
+  const tripData = JSON.parse(document.querySelector('.admin-editor').dataset.trip);
+  const syncTripDateFields = () => {
+    const datesTbd = tripForm.elements.datesTbd.checked;
+    tripForm.querySelectorAll('[data-trip-date-field]').forEach((field) => field.hidden = datesTbd);
+    tripForm.elements.startDate.required = !datesTbd;
+    tripForm.elements.endDate.required = !datesTbd;
+  };
+  tripForm?.elements.datesTbd?.addEventListener('change', syncTripDateFields);
   document.querySelector('[data-edit-trip]')?.addEventListener('click', () => {
-    const trip = JSON.parse(document.querySelector('.admin-editor').dataset.trip);
+    const trip = tripData;
     tripForm.reset();
     for (const key of ['title','destination','status','startDate','endDate','summary','body']) tripForm.elements[key].value = trip[key] ?? '';
+    tripForm.elements.datesTbd.checked = Boolean(trip.datesTbd);
+    syncTripDateFields();
     tripForm.elements.pendingItems.value = (trip.pendingItems ?? []).join('\n');
     tripForm.elements.draft.checked = Boolean(trip.draft);
     tripForm.elements.featured.checked = Boolean(trip.featured);
@@ -327,6 +339,7 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
     const data = new FormData(tripForm);
     const body = {
       title: data.get('title'), destination: data.get('destination'), status: data.get('status'),
+      datesTbd: tripForm.elements.datesTbd.checked,
       startDate: data.get('startDate'), endDate: data.get('endDate'), summary: data.get('summary'),
       body: data.get('body'), pendingItems: String(data.get('pendingItems') ?? '').split('\n').map((item) => item.trim()).filter(Boolean),
       draft: tripForm.elements.draft.checked, featured: tripForm.elements.featured.checked,
@@ -340,20 +353,36 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
   const dayForm = dayDialog?.querySelector('[data-day-form]');
   const dayError = dayDialog?.querySelector('[data-day-error]');
   const dayDialogTitle = dayDialog?.querySelector('[data-day-dialog-title]');
-  document.querySelector('[data-add-day]')?.addEventListener('click', () => {
-    dayForm.reset(); dayForm.elements.dayId.value = ''; dayDialogTitle.textContent = '添加日期'; dayError.hidden = true; dayDialog.showModal();
-  });
+  const syncDayDateField = () => {
+    const field = dayForm.querySelector('[data-day-date-field]');
+    field.hidden = Boolean(tripData.datesTbd);
+    dayForm.elements.date.required = !tripData.datesTbd;
+  };
+  document.querySelectorAll('[data-add-day]').forEach((button) => button.addEventListener('click', () => {
+    dayForm.reset(); dayForm.elements.dayId.value = ''; dayDialogTitle.textContent = '添加日期';
+    const dates = [...document.querySelectorAll('[data-day]')]
+      .map((day) => JSON.parse(day.dataset.day).date)
+      .filter(Boolean)
+      .sort();
+    const lastDate = dates.at(-1);
+    if (!tripData.datesTbd && lastDate) {
+      const nextDate = new Date(`${lastDate}T00:00:00Z`);
+      nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+      dayForm.elements.date.value = nextDate.toISOString().slice(0, 10);
+    }
+    syncDayDateField(); dayError.hidden = true; dayDialog.showModal();
+  }));
   document.querySelectorAll('[data-edit-day]').forEach((button) => button.addEventListener('click', () => {
     const day = JSON.parse(button.closest('[data-day]').dataset.day);
     dayForm.reset(); dayForm.elements.dayId.value = day.id; dayDialogTitle.textContent = '编辑日期';
-    dayForm.elements.date.value = day.date; dayForm.elements.city.value = day.city;
+    dayForm.elements.date.value = day.date ?? ''; dayForm.elements.city.value = day.city;
     dayForm.elements.title.value = day.title ?? ''; dayForm.elements.summary.value = day.summary ?? '';
-    dayError.hidden = true; dayDialog.showModal();
+    syncDayDateField(); dayError.hidden = true; dayDialog.showModal();
   }));
   dayForm?.addEventListener('submit', async (submitEvent) => {
     submitEvent.preventDefault(); dayError.hidden = true;
     const data = new FormData(dayForm);
-    const body = { date: data.get('date'), city: data.get('city'), title: data.get('title'), summary: data.get('summary') };
+    const body = { dateTbd: Boolean(tripData.datesTbd), date: data.get('date'), city: data.get('city'), title: data.get('title'), summary: data.get('summary') };
     const dayId = data.get('dayId');
     const tripId = document.querySelector('.admin-editor').dataset.tripId;
     const response = await api(dayId ? `/api/admin/days/${dayId}` : '/api/admin/days', {
@@ -364,7 +393,7 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
   });
   document.querySelectorAll('[data-delete-day]').forEach((button) => button.addEventListener('click', async () => {
     const day = JSON.parse(button.closest('[data-day]').dataset.day);
-    if (!confirm(`删除 ${day.date} ${day.city} 及其下所有模块和照片？`)) return;
+    if (!confirm(`删除 ${day.date || day.city} 及其下所有模块和照片？`)) return;
     const response = await api(`/api/admin/days/${day.id}`, { method: 'DELETE' });
     if (response.ok) window.location.reload(); else alert('删除失败。');
   }));

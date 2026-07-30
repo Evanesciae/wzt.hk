@@ -25,6 +25,11 @@ const preparedPhotos = event.photos.map((photo) => {
   const variants = [...photo.variants].sort((a, b) => a.width - b.width);
   return { ...photo, thumb: variants[0], full: variants.at(-1), variants };
 });
+const photoItems = preparedPhotos.map((photo) => ({
+  src: photo.full ? `/media/${photo.full.path}` : '',
+  alt: photo.alt,
+  caption: photo.caption ?? event.title,
+}));
 ---
 
 <article class:list={['timeline-event', `event-${event.type}`]} id={`event-${event.id}`}>
@@ -62,14 +67,12 @@ const preparedPhotos = event.photos.map((photo) => {
     )}
 
     {preparedPhotos.length > 0 && (
-      <div class="event-photo-album" data-event-photo-gallery>
+      <div class="event-photo-album" data-photo-gallery data-photo-items={JSON.stringify(photoItems)}>
         <div class="event-photos" aria-label={`${event.title}照片预览`}>
           {preparedPhotos.slice(0, 8).map((photo, index) => (
           <button
             type="button"
-            data-photo-src={photo.full ? `/media/${photo.full.path}` : ''}
-            data-photo-alt={photo.alt}
-            data-photo-caption={photo.caption ?? event.title}
+            data-photo-index={index}
             aria-label={`查看照片：${photo.alt}`}
           >
             {photo.thumb && <img
@@ -83,8 +86,12 @@ const preparedPhotos = event.photos.map((photo) => {
         </div>
         <dialog class="photo-dialog" data-photo-dialog>
           <button type="button" class="dialog-close" data-dialog-close aria-label="关闭照片">×</button>
-          <img data-dialog-image alt="" />
-          <p data-dialog-caption></p>
+          <div class="photo-dialog-stage">
+            <button type="button" class="photo-dialog-nav photo-dialog-previous" data-dialog-previous aria-label="上一张照片"><span aria-hidden="true">‹</span></button>
+            <img data-dialog-image alt="" />
+            <button type="button" class="photo-dialog-nav photo-dialog-next" data-dialog-next aria-label="下一张照片"><span aria-hidden="true">›</span></button>
+          </div>
+          <footer class="photo-dialog-meta"><p data-dialog-caption></p><span data-dialog-counter></span></footer>
         </dialog>
       </div>
     )}
@@ -92,22 +99,6 @@ const preparedPhotos = event.photos.map((photo) => {
 </article>
 
 <script>
-  document.querySelectorAll<HTMLElement>('[data-event-photo-gallery]').forEach((gallery) => {
-    if (gallery.dataset.ready) return;
-    gallery.dataset.ready = 'true';
-    const dialog = gallery.querySelector<HTMLDialogElement>('[data-photo-dialog]');
-    const image = dialog?.querySelector<HTMLImageElement>('[data-dialog-image]');
-    const caption = dialog?.querySelector<HTMLElement>('[data-dialog-caption]');
-    gallery.querySelectorAll<HTMLButtonElement>('[data-photo-src]').forEach((button) => {
-      button.addEventListener('click', () => {
-        if (!dialog || !image) return;
-        image.src = button.dataset.photoSrc ?? '';
-        image.alt = button.dataset.photoAlt ?? '';
-        if (caption) caption.textContent = button.dataset.photoCaption ?? '';
-        dialog.showModal();
-      });
-    });
-    dialog?.querySelector<HTMLButtonElement>('[data-dialog-close]')?.addEventListener('click', () => dialog.close());
-    dialog?.addEventListener('click', (event) => { if (event.target === dialog) dialog.close(); });
-  });
+  import { setupPhotoLightboxes } from '../lib/photo-lightbox';
+  setupPhotoLightboxes();
 </script>

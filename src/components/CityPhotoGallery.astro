@@ -1,11 +1,7 @@
 ---
-import type { TravelPhoto } from '../server/types';
-type GalleryPhoto = TravelPhoto & {
-  dateLabel: string;
-  eventTitle: string;
-};
+import type { CityPhoto } from '../server/types';
 
-interface Props { photos: GalleryPhoto[] }
+interface Props { photos: CityPhoto[] }
 const { photos } = Astro.props;
 const prepared = photos.map((photo) => {
   const variants = [...photo.variants].sort((a, b) => a.width - b.width);
@@ -14,11 +10,11 @@ const prepared = photos.map((photo) => {
 const photoItems = prepared.map((photo) => ({
   src: photo.full ? `/media/${photo.full.path}` : '',
   alt: photo.alt,
-  caption: photo.caption ?? `${photo.dateLabel} · ${photo.eventTitle}`,
+  caption: photo.caption ?? '',
 }));
 ---
 
-<div class="photo-gallery" data-photo-gallery data-photo-items={JSON.stringify(photoItems)}>
+<div class="photo-gallery city-photo-gallery" data-photo-gallery data-photo-items={JSON.stringify(photoItems)}>
   {prepared.map((photo, index) => (
     <button
       class:list={['gallery-photo', index === 0 && 'gallery-photo-featured']}
@@ -29,7 +25,10 @@ const photoItems = prepared.map((photo) => ({
       {photo.thumb && <img
         src={`/media/${photo.thumb.path}`}
         srcset={photo.variants.map((variant) => `/media/${variant.path} ${variant.width}w`).join(', ')}
-        sizes="(max-width: 600px) 50vw, 30vw" alt={photo.alt} loading="lazy" decoding="async"
+        sizes="(max-width: 600px) 50vw, 30vw"
+        alt={photo.alt}
+        loading="lazy"
+        decoding="async"
       />}
     </button>
   ))}

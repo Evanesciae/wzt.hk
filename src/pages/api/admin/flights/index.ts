@@ -5,7 +5,7 @@ import type { FlightInput } from '../../../../server/database';
 export const POST: APIRoute = async ({ request }) => {
   let body: FlightInput;
   try { body = await request.json(); } catch { return Response.json({ error: 'BAD_REQUEST' }, { status: 400 }); }
-  if (!body.date || !body.flightNumber || !body.fromAirport?.code || !body.toAirport?.code) {
+  if (!body.date || (!body.flightNumber && body.datePrecision !== 'month') || !body.fromAirport?.code || !body.toAirport?.code) {
     return Response.json({ error: 'INVALID_FLIGHT' }, { status: 422 });
   }
   try {

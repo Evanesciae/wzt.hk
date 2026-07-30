@@ -7,10 +7,10 @@ export const PATCH: APIRoute = async ({ params, request }) => {
   if (!id) return Response.json({ error: 'NOT_FOUND' }, { status: 404 });
   let body: Record<string, any>;
   try { body = await request.json(); } catch { return Response.json({ error: 'BAD_REQUEST' }, { status: 400 }); }
-  if (!body.date || !body.city?.trim()) return Response.json({ error: 'INVALID_DAY' }, { status: 422 });
+  if ((!body.dateTbd && !body.date) || !body.city?.trim()) return Response.json({ error: 'INVALID_DAY' }, { status: 422 });
   try {
     updateDay(id, {
-      date: String(body.date), city: String(body.city).trim(),
+      date: body.dateTbd ? undefined : String(body.date), city: String(body.city).trim(),
       title: body.title?.trim() || undefined, summary: body.summary?.trim() || undefined,
     });
     return Response.json({ ok: true });

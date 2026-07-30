@@ -1,6 +1,7 @@
 ---
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Flight } from '../server/types';
+import { formatFlightDate } from '../lib/content';
 
 interface Props {
   flights: Flight[];
@@ -10,7 +11,7 @@ interface Props {
 const { flights, compact = false } = Astro.props;
 const routes = flights.map((flight) => ({
   id: flight.id,
-  title: `${flight.date} · ${flight.flightNumber} · ${flight.fromAirport.code} → ${flight.toAirport.code}`,
+  title: `${formatFlightDate(flight.date, flight.datePrecision)} · ${flight.flightNumber || '航班待确认'} · ${flight.fromAirport.code} → ${flight.toAirport.code}`,
   from: { code: flight.fromAirport.code, city: flight.fromAirport.city, lat: flight.fromAirport.lat, lng: flight.fromAirport.lng },
   to: { code: flight.toAirport.code, city: flight.toAirport.city, lat: flight.toAirport.lat, lng: flight.toAirport.lng },
 })).filter((route) => route.from.lat && route.from.lng && route.to.lat && route.to.lng);

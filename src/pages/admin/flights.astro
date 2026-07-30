@@ -2,6 +2,7 @@
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import { listFlights, listTrips } from '../../server/database';
 import { airlineNames } from '../../server/airlines';
+import { formatFlightDate } from '../../lib/content';
 
 const flights = listFlights();
 const trips = listTrips(true);
@@ -18,12 +19,13 @@ const trips = listTrips(true);
       <h2 data-flight-form-title>新增航班</h2>
       <form class="flight-manual-form" data-flight-form>
         <input type="hidden" name="id" />
+        <label>日期信息<select name="datePrecision"><option value="day">具体日期</option><option value="month">只知道月份</option></select></label>
         <label>日期<input name="date" type="date" required /></label>
-        <label>航班号<input name="flightNumber" required placeholder="CX919" /></label>
+        <label>航班号<input name="flightNumber" required placeholder="未知可留空" /></label>
         <label>航司<input name="airlineName" placeholder="自动识别，可修改" /></label>
-        <label>计划起飞<input name="departureTime" type="time" /></label>
-        <label>计划到达<input name="arrivalTime" type="time" /></label>
-        <label class="form-check-inline"><input name="arrivalNextDay" type="checkbox" /><span>次日到达</span></label>
+        <label data-exact-date-field>计划起飞<input name="departureTime" type="time" /></label>
+        <label data-exact-date-field>计划到达<input name="arrivalTime" type="time" /></label>
+        <label class="form-check-inline" data-exact-date-field><input name="arrivalNextDay" type="checkbox" /><span>次日到达</span></label>
 
         <div class="airport-picker" data-airport-picker="from">
           <label>出发机场<input name="fromAirportSearch" autocomplete="off" placeholder="HKG / 香港 / Hong Kong" required /></label>
@@ -56,7 +58,7 @@ const trips = listTrips(true);
         {flights.map((flight) => (
           <div class="admin-trip-row">
             <a href={`/travel/flights/${flight.id}/`} target="_blank">
-              <div><strong>{flight.flightNumber} · {flight.fromAirport.code} → {flight.toAirport.code}</strong><span>{flight.date} · {flight.airlineName ?? flight.airlineCode ?? '未记录航司'}</span></div>
+              <div><strong>{flight.flightNumber || '航班待确认'} · {flight.fromAirport.code} → {flight.toAirport.code}</strong><span>{formatFlightDate(flight.date, flight.datePrecision)} · {flight.airlineName ?? flight.airlineCode ?? '未记录航司'}</span></div>
               <span>查看 ↗</span>
             </a>
             <button type="button" class="text-button" data-edit-flight={JSON.stringify(flight)}>编辑</button>
@@ -76,6 +78,16 @@ const trips = listTrips(true);
   const error = document.querySelector('[data-flight-error]');
   const title = document.querySelector('[data-flight-form-title]');
   const selectedAirports = { from: null, to: null };
+  const syncDatePrecision = () => {
+    const monthOnly = form.elements.datePrecision.value === 'month';
+    form.elements.date.type = monthOnly ? 'month' : 'date';
+    form.elements.flightNumber.required = !monthOnly;
+    form.querySelectorAll('[data-exact-date-field]').forEach((field) => field.hidden = monthOnly);
+  };
+  form.elements.datePrecision.addEventListener('change', () => {
+    form.elements.date.value = '';
+    syncDatePrecision();
+  });
 
   const normalizeFlightNumber = (value) => String(value ?? '').trim().toUpperCase().replace(/\s+/g, '');
   const airlineCode = (value) => normalizeFlightNumber(value).match(/^[A-Z0-9]{2}/)?.[0] ?? '';
@@ -99,6 +111,7 @@ const trips = listTrips(true);
   function resetForm() {
     form.reset();
     form.elements.id.value = '';
+    syncDatePrecision();
     title.textContent = '新增航班';
     setAirport('from', null);
     setAirport('to', null);
@@ -168,17 +181,20 @@ const trips = listTrips(true);
       error.hidden = false;
       return;
     }
-    const date = String(data.get('date'));
+    const datePrecision = String(data.get('datePrecision'));
+    const rawDate = String(data.get('date'));
+    const date = datePrecision === 'month' ? `${rawDate}-01` : rawDate;
     const body = {
       id: data.get('id') || undefined,
       date,
+      datePrecision,
       flightNumber,
       airlineCode: code || undefined,
       airlineName: data.get('airlineName') || (code ? airlineNames[code] : undefined),
       fromAirport,
       toAirport,
-      scheduledDeparture: dateTime(date, data.get('departureTime')),
-      scheduledArrival: dateTime(date, data.get('arrivalTime'), form.elements.arrivalNextDay.checked),
+      scheduledDeparture: datePrecision === 'day' ? dateTime(date, data.get('departureTime')) : undefined,
+      scheduledArrival: datePrecision === 'day' ? dateTime(date, data.get('arrivalTime'), form.elements.arrivalNextDay.checked) : undefined,
       aircraftType: data.get('aircraftType') || undefined,
       aircraftReg: data.get('aircraftReg') || undefined,
       cabin: data.get('cabin') || undefined,
@@ -199,7 +215,9 @@ const trips = listTrips(true);
     resetForm();
     title.textContent = '编辑航班';
     form.elements.id.value = flight.id;
-    form.elements.date.value = flight.date;
+    form.elements.datePrecision.value = flight.datePrecision ?? 'day';
+    syncDatePrecision();
+    form.elements.date.value = flight.datePrecision === 'month' ? flight.date.slice(0, 7) : flight.date;
     form.elements.flightNumber.value = flight.flightNumber;
     form.elements.airlineName.value = flight.airlineName ?? '';
     form.elements.departureTime.value = flight.scheduledDeparture?.slice(11, 16) ?? '';

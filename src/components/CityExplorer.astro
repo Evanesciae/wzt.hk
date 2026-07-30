@@ -1,0 +1,285 @@
+---
+import 'maplibre-gl/dist/maplibre-gl.css';
+import type { CityDefinition } from '../data/cities';
+import type { CityPlace } from '../server/types';
+
+interface Props {
+  cities: CityDefinition[];
+  places: CityPlace[];
+}
+
+const { cities, places } = Astro.props;
+const initialCity = cities[0];
+const initialPlaces = places.filter((place) => place.city === initialCity.slug);
+const coverFor = (place: CityPlace) => {
+  const photo = place.photos.find((item) => item.featured) ?? place.photos[0];
+  if (!photo) return;
+  return [...photo.variants].sort((a, b) => a.width - b.width)[Math.min(1, photo.variants.length - 1)];
+};
+---
+
+<section class="city-explorer" data-city-explorer data-cities={JSON.stringify(cities)} data-places={JSON.stringify(places)}>
+  <div class="city-toolbar">
+    <div class="city-switcher" role="tablist" aria-label="选择城市">
+      {cities.map((city, index) => (
+        <button
+          type="button"
+          role="tab"
+          aria-selected={index === 0 ? 'true' : 'false'}
+          class:list={['city-switch-button', index === 0 && 'is-active']}
+          data-city-slug={city.slug}
+        >
+          <span>{city.englishName}</span>
+          <strong>{city.name}</strong>
+        </button>
+      ))}
+    </div>
+    <div class="city-filter-list" data-city-filters aria-label="按类型筛选"></div>
+  </div>
+
+  <div class="city-map-frame" data-city-map-frame>
+    <button class="map-fullscreen-button city-map-fullscreen" type="button" data-city-fullscreen>
+      全屏地图
+    </button>
+    <div class="city-map-canvas" data-city-map aria-label="城市地点地图"></div>
+  </div>
+
+  <section class="city-place-section">
+    <div class="section-heading">
+      <div><p class="eyebrow">PLACES</p><h2 data-place-heading>{initialCity.name}</h2></div>
+      <span class="city-list-count" data-visible-count>{initialPlaces.length} 个地点</span>
+    </div>
+    <div class="city-place-list" data-city-place-list>
+      {initialPlaces.map((place) => {
+        const cover = coverFor(place);
+        return (
+          <a class="city-photo-card" href={`/cities/${place.city}/${place.id}/`} data-place-id={place.id}>
+            <span class:list={['city-place-cover', !cover && 'city-place-cover-empty']}>
+              {cover && <img src={`/media/${cover.path}`} alt="" loading="lazy" decoding="async" />}
+            </span>
+            <span class="city-photo-card-body">
+              <span>
+                <strong>{place.name}</strong>
+                <small>{[place.type, place.district].filter(Boolean).join(' · ')}</small>
+              </span>
+              <span class="city-photo-count">{place.photos.length} 张</span>
+            </span>
+          </a>
+        );
+      })}
+    </div>
+    <p class="city-empty" data-city-empty hidden>暂无地点</p>
+  </section>
+</section>
+
+<script>
+  interface Variant { width: number; height: number; path: string; size: number }
+  interface Photo { id: string; featured: boolean; alt: string; variants: Variant[] }
+  interface Place {
+    id: string;
+    city: string;
+    name: string;
+    type: string;
+    district?: string;
+    lat: number;
+    lng: number;
+    photos: Photo[];
+  }
+  interface City {
+    slug: string;
+    name: string;
+    englishName: string;
+    center: [number, number];
+    zoom: number;
+  }
+
+  document.querySelectorAll<HTMLElement>('[data-city-explorer]').forEach(async (root) => {
+    if (root.dataset.ready) return;
+    root.dataset.ready = 'true';
+    const cities: City[] = JSON.parse(root.dataset.cities ?? '[]');
+    const places: Place[] = JSON.parse(root.dataset.places ?? '[]');
+    const mapCanvas = root.querySelector<HTMLElement>('[data-city-map]');
+    const mapFrame = root.querySelector<HTMLElement>('[data-city-map-frame]');
+    const fullscreenButton = root.querySelector<HTMLButtonElement>('[data-city-fullscreen]');
+    const filterList = root.querySelector<HTMLElement>('[data-city-filters]');
+    const placeList = root.querySelector<HTMLElement>('[data-city-place-list]');
+    const empty = root.querySelector<HTMLElement>('[data-city-empty]');
+    const placeHeading = root.querySelector<HTMLElement>('[data-place-heading]');
+    const visibleCount = root.querySelector<HTMLElement>('[data-visible-count]');
+    if (!mapCanvas || !mapFrame || !filterList || !placeList || cities.length === 0) return;
+    const filterListElement = filterList;
+    const placeListElement = placeList;
+
+    const requestedCity = new URLSearchParams(window.location.search).get('city');
+    let activeCity = cities.find((city) => city.slug === requestedCity) ?? cities[0];
+    let activeType = 'all';
+    let mapLoaded = false;
+    const markers: any[] = [];
+    const cityButtons = [...root.querySelectorAll<HTMLButtonElement>('[data-city-slug]')];
+
+    const { default: maplibregl } = await import('maplibre-gl');
+    const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const map = new maplibregl.Map({
+      container: mapCanvas,
+      style: `https://tiles.openfreemap.org/styles/${dark ? 'dark' : 'positron'}`,
+      center: activeCity.center,
+      zoom: activeCity.zoom,
+      cooperativeGestures: true,
+    });
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+
+    const cityPlaces = () => places.filter((place) => place.city === activeCity.slug);
+    const visiblePlaces = () => cityPlaces().filter((place) => activeType === 'all' || place.type === activeType);
+
+    function coverFor(place: Place) {
+      const photo = place.photos.find((item) => item.featured) ?? place.photos[0];
+      if (!photo) return;
+      const variants = [...photo.variants].sort((a, b) => a.width - b.width);
+      return variants[Math.min(1, variants.length - 1)];
+    }
+
+    function renderCards() {
+      const currentPlaces = visiblePlaces();
+      placeListElement.innerHTML = '';
+      currentPlaces.forEach((place) => {
+        const link = document.createElement('a');
+        link.className = 'city-photo-card';
+        link.href = `/cities/${place.city}/${place.id}/`;
+
+        const cover = document.createElement('span');
+        cover.className = 'city-place-cover';
+        const variant = coverFor(place);
+        if (variant) {
+          const image = document.createElement('img');
+          image.src = `/media/${variant.path}`;
+          image.alt = '';
+          image.loading = 'lazy';
+          image.decoding = 'async';
+          cover.append(image);
+        } else {
+          cover.classList.add('city-place-cover-empty');
+        }
+
+        const body = document.createElement('span');
+        body.className = 'city-photo-card-body';
+        const identity = document.createElement('span');
+        const name = document.createElement('strong');
+        name.textContent = place.name;
+        const meta = document.createElement('small');
+        meta.textContent = [place.type, place.district].filter(Boolean).join(' · ');
+        identity.append(name, meta);
+        const count = document.createElement('span');
+        count.className = 'city-photo-count';
+        count.textContent = `${place.photos.length} 张`;
+        body.append(identity, count);
+        link.append(cover, body);
+        placeListElement.append(link);
+      });
+      if (empty) empty.hidden = currentPlaces.length !== 0;
+      if (placeHeading) placeHeading.textContent = activeCity.name;
+      if (visibleCount) visibleCount.textContent = `${currentPlaces.length} 个地点`;
+    }
+
+    function popupContent(place: Place) {
+      const content = document.createElement('div');
+      content.className = 'city-map-popup';
+      const meta = document.createElement('span');
+      meta.textContent = [place.type, place.district].filter(Boolean).join(' · ');
+      const name = document.createElement('strong');
+      name.textContent = place.name;
+      const link = document.createElement('a');
+      link.href = `/cities/${place.city}/${place.id}/`;
+      link.textContent = `照片 ${place.photos.length} 张 →`;
+      content.append(meta, name, link);
+      return content;
+    }
+
+    function renderMarkers(duration = 500) {
+      markers.splice(0).forEach((marker) => marker.remove());
+      const currentPlaces = visiblePlaces();
+      currentPlaces.forEach((place, index) => {
+        const element = document.createElement('button');
+        element.type = 'button';
+        element.className = 'city-map-marker';
+        element.textContent = String(index + 1);
+        element.title = place.name;
+        const marker = new maplibregl.Marker({ element })
+          .setLngLat([place.lng, place.lat])
+          .setPopup(new maplibregl.Popup({ offset: 18 }).setDOMContent(popupContent(place)))
+          .addTo(map);
+        markers.push(marker);
+      });
+      if (currentPlaces.length === 0) {
+        map.easeTo({ center: activeCity.center, zoom: activeCity.zoom, duration });
+      } else if (currentPlaces.length === 1) {
+        map.easeTo({ center: [currentPlaces[0].lng, currentPlaces[0].lat], zoom: 13, duration });
+      } else {
+        const bounds = new maplibregl.LngLatBounds();
+        currentPlaces.forEach((place) => bounds.extend([place.lng, place.lat]));
+        map.fitBounds(bounds, { padding: 72, maxZoom: 12.5, duration });
+      }
+    }
+
+    function setType(type: string) {
+      activeType = type;
+      filterListElement.querySelectorAll<HTMLButtonElement>('button').forEach((button) => {
+        const active = button.dataset.type === type;
+        button.classList.toggle('is-active', active);
+        button.setAttribute('aria-pressed', String(active));
+      });
+      renderCards();
+      if (mapLoaded) renderMarkers();
+    }
+
+    function renderFilters() {
+      filterListElement.innerHTML = '';
+      const types = ['all', ...new Set(cityPlaces().map((place) => place.type))];
+      types.forEach((type) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.type = type;
+        button.className = `city-filter-button${type === activeType ? ' is-active' : ''}`;
+        button.setAttribute('aria-pressed', String(type === activeType));
+        button.textContent = type === 'all' ? '全部' : type;
+        button.addEventListener('click', () => setType(type));
+        filterListElement.append(button);
+      });
+    }
+
+    function renderCity() {
+      cityButtons.forEach((button) => {
+        const active = button.dataset.citySlug === activeCity.slug;
+        button.classList.toggle('is-active', active);
+        button.setAttribute('aria-selected', String(active));
+      });
+      renderFilters();
+      renderCards();
+      if (mapLoaded) renderMarkers(650);
+    }
+
+    cityButtons.forEach((button) => button.addEventListener('click', () => {
+      const next = cities.find((city) => city.slug === button.dataset.citySlug);
+      if (!next || next.slug === activeCity.slug) return;
+      activeCity = next;
+      activeType = 'all';
+      const url = new URL(window.location.href);
+      url.searchParams.set('city', activeCity.slug);
+      window.history.replaceState({}, '', url);
+      renderCity();
+    }));
+
+    fullscreenButton?.addEventListener('click', async () => {
+      if (document.fullscreenElement === mapFrame) await document.exitFullscreen();
+      else await mapFrame.requestFullscreen();
+    });
+    document.addEventListener('fullscreenchange', () => {
+      if (fullscreenButton) fullscreenButton.textContent = document.fullscreenElement === mapFrame ? '退出全屏' : '全屏地图';
+      map.resize();
+    });
+    map.on('load', () => {
+      mapLoaded = true;
+      renderMarkers(0);
+    });
+    renderCity();
+  });
+</script>

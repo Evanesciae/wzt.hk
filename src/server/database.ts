@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { parse as parseYaml } from 'yaml';
 import { seedAirports, fallbackAirport } from './airports';
-import type { Airport, EventType, Flight, KbNote, TravelDay, TravelEvent, TravelEventData, TravelPhoto, TravelTrip, TripStatus } from './types';
+import type { Airport, CityPhoto, CityPlace, CitySlug, EventType, Flight, KbNote, TravelDay, TravelEvent, TravelEventData, TravelPhoto, TravelTrip, TripStatus } from './types';
 
 type Row = Record<string, unknown>;
 let database: DatabaseSync | undefined;
@@ -75,7 +75,7 @@ function initSchema(db: DatabaseSync) {
       country TEXT NOT NULL, lat REAL NOT NULL, lng REAL NOT NULL, timezone TEXT
     );
     CREATE TABLE IF NOT EXISTS flights (
-      id TEXT PRIMARY KEY, date TEXT NOT NULL, flight_number TEXT NOT NULL,
+      id TEXT PRIMARY KEY, date TEXT NOT NULL, date_precision TEXT NOT NULL DEFAULT 'day', flight_number TEXT NOT NULL,
       airline_code TEXT, airline_name TEXT, from_airport TEXT NOT NULL REFERENCES airports(code),
       to_airport TEXT NOT NULL REFERENCES airports(code), scheduled_departure TEXT, scheduled_arrival TEXT,
       actual_departure TEXT, actual_arrival TEXT, aircraft_type TEXT, aircraft_reg TEXT,
@@ -85,6 +85,23 @@ function initSchema(db: DatabaseSync) {
     );
     CREATE INDEX IF NOT EXISTS flights_date ON flights(date DESC);
     CREATE INDEX IF NOT EXISTS flights_route ON flights(from_airport, to_airport);
+    CREATE TABLE IF NOT EXISTS city_places (
+      id TEXT PRIMARY KEY, city TEXT NOT NULL, name TEXT NOT NULL, type TEXT NOT NULL,
+      district TEXT, lat REAL NOT NULL, lng REAL NOT NULL, note TEXT,
+      sort_order INTEGER NOT NULL DEFAULT 0, draft INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS city_photos (
+      id TEXT PRIMARY KEY, place_id TEXT NOT NULL REFERENCES city_places(id) ON DELETE CASCADE,
+      original_path TEXT NOT NULL, variants TEXT NOT NULL, alt TEXT NOT NULL,
+      caption TEXT, featured INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL,
+      sort_order INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS city_places_city_order ON city_places(city, sort_order, name);
+    CREATE INDEX IF NOT EXISTS city_photos_place_order ON city_photos(place_id, sort_order, created_at);
+    CREATE TABLE IF NOT EXISTS app_migrations (
+      id TEXT PRIMARY KEY, applied_at TEXT NOT NULL
+    );
   `);
   try { db.exec('ALTER TABLE travel_photos ADD COLUMN taken_at TEXT'); } catch {}
   try { db.exec('ALTER TABLE travel_photos ADD COLUMN sort_order INTEGER'); } catch {}
@@ -92,6 +109,8 @@ function initSchema(db: DatabaseSync) {
   try { db.exec("ALTER TABLE travel_events ADD COLUMN time_source TEXT NOT NULL DEFAULT 'photo'"); addedTimeSource = true; } catch {}
   if (addedTimeSource) db.exec("UPDATE travel_events SET time_source='manual' WHERE time IS NOT NULL AND time != ''");
   try { db.exec('ALTER TABLE kb_notes ADD COLUMN strict INTEGER NOT NULL DEFAULT 0'); } catch {}
+  try { db.exec('ALTER TABLE trips ADD COLUMN dates_tbd INTEGER NOT NULL DEFAULT 0'); } catch {}
+  try { db.exec("ALTER TABLE flights ADD COLUMN date_precision TEXT NOT NULL DEFAULT 'day'"); } catch {}
 }
 
 export function getDatabase() {
@@ -108,8 +127,30 @@ export function getDatabase() {
     try { syncPhotoTimes(database); } catch (error) { console.error('Photo time sync failed:', error); }
     try { seedKb(database); } catch (error) { console.error('Seed kb failed:', error); }
     try { seedAirportRows(database); } catch (error) { console.error('Seed airports failed:', error); }
+    try { seedCityPlaces(database); } catch (error) { console.error('Seed city places failed:', error); }
   }
   return database;
+}
+
+function seedCityPlaces(db: DatabaseSync) {
+  const migrationId = 'city-places-v1';
+  const applied = db.prepare('SELECT id FROM app_migrations WHERE id=?').get(migrationId);
+  if (applied) return;
+  const insert = db.prepare(`INSERT OR IGNORE INTO city_places
+    (id,city,name,type,district,lat,lng,note,sort_order,draft,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`);
+  const now = new Date().toISOString();
+  db.exec('BEGIN');
+  try {
+    insert.run('braemar-hill', 'hong-kong', '宝马山', '山野', '东区', 22.2864, 114.2064, null, 0, 0, now);
+    insert.run('lion-rock', 'hong-kong', '狮子山', '山野', '黄大仙区', 22.3531, 114.1869, null, 1, 0, now);
+    insert.run('west-kowloon-cultural-district', 'hong-kong', '西九文化区', '文化区', '油尖旺区', 22.3008, 114.1577, null, 2, 0, now);
+    db.prepare('INSERT INTO app_migrations (id,applied_at) VALUES (?,?)').run(migrationId, now);
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
 }
 
 function seedTravel(db: DatabaseSync) {
@@ -246,7 +287,9 @@ function ensureAirport(db: DatabaseSync, airport: Airport) {
 
 function rowToFlight(row: Row): Flight {
   return {
-    id: String(row.id), date: String(row.date), flightNumber: String(row.flight_number),
+    id: String(row.id), date: String(row.date),
+    datePrecision: row.date_precision === 'month' ? 'month' : 'day',
+    flightNumber: String(row.flight_number),
     airlineCode: row.airline_code ? String(row.airline_code) : undefined,
     airlineName: row.airline_name ? String(row.airline_name) : undefined,
     fromAirport: {
@@ -358,11 +401,11 @@ export function upsertFlight(input: FlightInput) {
     ensureAirport(db, from);
     ensureAirport(db, to);
     db.prepare(`INSERT INTO flights
-      (id,date,flight_number,airline_code,airline_name,from_airport,to_airport,scheduled_departure,
+      (id,date,date_precision,flight_number,airline_code,airline_name,from_airport,to_airport,scheduled_departure,
        scheduled_arrival,actual_departure,actual_arrival,aircraft_type,aircraft_reg,cabin,seat,
        distance_km,duration_minutes,trip_id,note,source,raw,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-      ON CONFLICT(id) DO UPDATE SET date=excluded.date,flight_number=excluded.flight_number,
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(id) DO UPDATE SET date=excluded.date,date_precision=excluded.date_precision,flight_number=excluded.flight_number,
        airline_code=excluded.airline_code,airline_name=excluded.airline_name,from_airport=excluded.from_airport,
        to_airport=excluded.to_airport,scheduled_departure=excluded.scheduled_departure,
        scheduled_arrival=excluded.scheduled_arrival,actual_departure=excluded.actual_departure,
@@ -371,7 +414,7 @@ export function upsertFlight(input: FlightInput) {
        distance_km=excluded.distance_km,duration_minutes=excluded.duration_minutes,
        trip_id=excluded.trip_id,note=excluded.note,source=excluded.source,raw=excluded.raw,
        updated_at=excluded.updated_at`)
-      .run(id, input.date, input.flightNumber, input.airlineCode ?? null, input.airlineName ?? null,
+      .run(id, input.date, input.datePrecision ?? 'day', input.flightNumber, input.airlineCode ?? null, input.airlineName ?? null,
         from.code, to.code, input.scheduledDeparture ?? null, input.scheduledArrival ?? null,
         input.actualDeparture ?? null, input.actualArrival ?? null, input.aircraftType ?? null,
         input.aircraftReg ?? null, input.cabin ?? null, input.seat ?? null, distance ?? null,
@@ -503,7 +546,10 @@ function rowToEvent(row: Row, photos: TravelPhoto[]): TravelEvent {
 function baseTrip(row: Row): TravelTrip {
   return {
     id: String(row.id), title: String(row.title), destination: String(row.destination),
-    status: String(row.status) as TripStatus, startDate: String(row.start_date), endDate: String(row.end_date),
+    status: String(row.status) as TripStatus,
+    startDate: row.start_date ? String(row.start_date) : undefined,
+    endDate: row.end_date ? String(row.end_date) : undefined,
+    datesTbd: Boolean(row.dates_tbd),
     summary: String(row.summary), pendingItems: JSON.parse(String(row.pending_items)), body: String(row.body),
     updatedAt: String(row.updated_at), draft: Boolean(row.draft), featured: Boolean(row.featured), days: [],
   };
@@ -511,7 +557,7 @@ function baseTrip(row: Row): TravelTrip {
 
 export function listTrips(includeDrafts = false): TravelTrip[] {
   const rows = getDatabase().prepare(`SELECT * FROM trips ${includeDrafts ? '' : 'WHERE draft = 0'}
-    ORDER BY featured DESC, start_date DESC`).all() as Row[];
+    ORDER BY featured DESC, dates_tbd DESC, start_date DESC, updated_at DESC`).all() as Row[];
   return rows.map(baseTrip);
 }
 
@@ -528,7 +574,7 @@ export function getTrip(tripId: string, includeDrafts = false): TravelTrip | und
   const photos = photoRows.map(rowToPhoto);
   const events = eventRows.map((event) => rowToEvent(event, photos));
   const days: TravelDay[] = dayRows.map((day) => ({
-    id: String(day.id), tripId: String(day.trip_id), date: String(day.date), city: String(day.city),
+    id: String(day.id), tripId: String(day.trip_id), date: day.date ? String(day.date) : undefined, city: String(day.city),
     title: day.title ? String(day.title) : undefined, summary: day.summary ? String(day.summary) : undefined,
     sortOrder: Number(day.sort_order), events: events.filter((event) => event.dayId === day.id),
   }));
@@ -539,7 +585,7 @@ const tripStatuses = new Set<TripStatus>(['upcoming', 'planning', 'archived']);
 
 export interface TripInput {
   id?: string; title: string; destination: string; status: TripStatus;
-  startDate: string; endDate: string; summary: string;
+  startDate?: string; endDate?: string; datesTbd?: boolean; summary: string;
   pendingItems?: string[]; body?: string; draft?: boolean; featured?: boolean;
 }
 
@@ -547,19 +593,22 @@ export function createTrip(input: TripInput) {
   const db = getDatabase();
   if (!input.id || !tripStatuses.has(input.status)) throw new Error('INVALID_INPUT');
   db.prepare(`INSERT INTO trips
-    (id,title,destination,status,start_date,end_date,summary,pending_items,body,updated_at,draft,featured)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-    input.id, input.title, input.destination, input.status, toDate(input.startDate), toDate(input.endDate),
+    (id,title,destination,status,start_date,end_date,summary,pending_items,body,updated_at,draft,featured,dates_tbd)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    input.id, input.title, input.destination, input.status,
+    input.datesTbd ? '' : toDate(input.startDate), input.datesTbd ? '' : toDate(input.endDate),
     input.summary, JSON.stringify(input.pendingItems ?? []), input.body ?? '', toDate(new Date().toISOString()), input.draft ? 1 : 0, input.featured ? 1 : 0,
+    input.datesTbd ? 1 : 0,
   );
   return input.id;
 }
 
 export function updateTrip(tripId: string, input: TripInput) {
   if (!tripStatuses.has(input.status)) throw new Error('INVALID_STATUS');
-  getDatabase().prepare(`UPDATE trips SET title=?,destination=?,status=?,start_date=?,end_date=?,summary=?,
+  getDatabase().prepare(`UPDATE trips SET title=?,destination=?,status=?,start_date=?,end_date=?,dates_tbd=?,summary=?,
     pending_items=?,body=?,draft=?,featured=?,updated_at=date('now') WHERE id=?`).run(
-    input.title, input.destination, input.status, toDate(input.startDate), toDate(input.endDate),
+    input.title, input.destination, input.status,
+    input.datesTbd ? '' : toDate(input.startDate), input.datesTbd ? '' : toDate(input.endDate), input.datesTbd ? 1 : 0,
     input.summary, JSON.stringify(input.pendingItems ?? []), input.body ?? '', input.draft ? 1 : 0, input.featured ? 1 : 0, tripId,
   );
 }
@@ -574,16 +623,17 @@ export function listTripPhotoIds(tripId: string) {
   return rows.map((row) => String(row.id));
 }
 
-export interface DayInput { date: string; city: string; title?: string; summary?: string }
+export interface DayInput { date?: string; city: string; title?: string; summary?: string }
 
 export function createDay(tripId: string, input: DayInput) {
   const db = getDatabase();
-  const dayId = `${tripId}/${toDate(input.date)}`;
+  const normalizedDate = input.date ? toDate(input.date) : '';
+  const dayId = normalizedDate ? `${tripId}/${normalizedDate}` : `${tripId}/day-${randomUUID().slice(0, 8)}`;
   const sortOrder = Number((db.prepare('SELECT COUNT(*) AS count FROM trip_days WHERE trip_id=?').get(tripId) as Row).count);
   db.exec('BEGIN');
   try {
     db.prepare(`INSERT INTO trip_days (id,trip_id,date,city,title,summary,sort_order) VALUES (?,?,?,?,?,?,?)`)
-      .run(dayId, tripId, toDate(input.date), input.city, input.title ?? null, input.summary ?? null, sortOrder);
+      .run(dayId, tripId, normalizedDate, input.city, input.title ?? null, input.summary ?? null, sortOrder);
     db.prepare('UPDATE trips SET updated_at=date(\'now\') WHERE id=?').run(tripId);
     db.exec('COMMIT');
   } catch (error) { db.exec('ROLLBACK'); throw error; }
@@ -595,7 +645,7 @@ export function updateDay(dayId: string, input: DayInput) {
   db.exec('BEGIN');
   try {
     db.prepare('UPDATE trip_days SET date=?,city=?,title=?,summary=? WHERE id=?')
-      .run(toDate(input.date), input.city, input.title ?? null, input.summary ?? null, dayId);
+      .run(input.date ? toDate(input.date) : '', input.city, input.title ?? null, input.summary ?? null, dayId);
     db.prepare(`UPDATE trips SET updated_at=date('now') WHERE id=(SELECT trip_id FROM trip_days WHERE id=?)`).run(dayId);
     db.exec('COMMIT');
   } catch (error) { db.exec('ROLLBACK'); throw error; }
@@ -729,4 +779,172 @@ export function deletePhotoRecord(photoId: string) {
   const photo = db.prepare('SELECT event_id FROM travel_photos WHERE id=?').get(photoId) as Row | undefined;
   db.prepare('DELETE FROM travel_photos WHERE id=?').run(photoId);
   if (photo) syncEventTimeFromPhotos(String(photo.event_id));
+}
+
+function rowToCityPhoto(row: Row): CityPhoto {
+  return {
+    id: String(row.id),
+    placeId: String(row.place_id),
+    originalPath: String(row.original_path),
+    variants: JSON.parse(String(row.variants)),
+    alt: String(row.alt),
+    caption: row.caption ? String(row.caption) : undefined,
+    featured: Boolean(row.featured),
+    createdAt: String(row.created_at),
+    sortOrder: row.sort_order == null ? null : Number(row.sort_order),
+  };
+}
+
+function rowToCityPlace(row: Row, photos: CityPhoto[]): CityPlace {
+  return {
+    id: String(row.id),
+    city: String(row.city) as CitySlug,
+    name: String(row.name),
+    type: String(row.type),
+    district: row.district ? String(row.district) : undefined,
+    lat: Number(row.lat),
+    lng: Number(row.lng),
+    note: row.note ? String(row.note) : undefined,
+    sortOrder: Number(row.sort_order),
+    draft: Boolean(row.draft),
+    updatedAt: String(row.updated_at),
+    photos: photos.filter((photo) => photo.placeId === row.id),
+  };
+}
+
+export function listCityPlaces(includeDrafts = false): CityPlace[] {
+  const db = getDatabase();
+  const rows = db.prepare(`SELECT * FROM city_places ${includeDrafts ? '' : 'WHERE draft=0'}
+    ORDER BY city,sort_order,name`).all() as Row[];
+  const photoRows = db.prepare(`SELECT p.* FROM city_photos p JOIN city_places c ON c.id=p.place_id
+    ${includeDrafts ? '' : 'WHERE c.draft=0'}
+    ORDER BY p.featured DESC,p.sort_order IS NULL,p.sort_order,p.created_at`).all() as Row[];
+  const photos = photoRows.map(rowToCityPhoto);
+  return rows.map((row) => rowToCityPlace(row, photos));
+}
+
+export function getCityPlace(id: string, includeDrafts = false): CityPlace | undefined {
+  const db = getDatabase();
+  const row = db.prepare(`SELECT * FROM city_places WHERE id=? ${includeDrafts ? '' : 'AND draft=0'}`)
+    .get(id) as Row | undefined;
+  if (!row) return;
+  const photos = (db.prepare(`SELECT * FROM city_photos WHERE place_id=?
+    ORDER BY featured DESC,sort_order IS NULL,sort_order,created_at`).all(id) as Row[]).map(rowToCityPhoto);
+  return rowToCityPlace(row, photos);
+}
+
+export function getCityPlaceByRoute(city: string, id: string, includeDrafts = false) {
+  const place = getCityPlace(id, includeDrafts);
+  return place?.city === city ? place : undefined;
+}
+
+export interface CityPlaceInput {
+  id?: string;
+  city: CitySlug;
+  name: string;
+  type: string;
+  district?: string;
+  lat: number;
+  lng: number;
+  note?: string;
+  draft?: boolean;
+}
+
+export function createCityPlace(input: CityPlaceInput) {
+  if (!input.id) throw new Error('INVALID_INPUT');
+  const db = getDatabase();
+  const sortOrder = Number((db.prepare('SELECT COUNT(*) AS count FROM city_places WHERE city=?').get(input.city) as Row).count);
+  db.prepare(`INSERT INTO city_places
+    (id,city,name,type,district,lat,lng,note,sort_order,draft,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
+    input.id, input.city, input.name, input.type, input.district ?? null,
+    input.lat, input.lng, input.note ?? null, sortOrder, input.draft ? 1 : 0, new Date().toISOString(),
+  );
+  return input.id;
+}
+
+export function updateCityPlace(id: string, input: CityPlaceInput) {
+  getDatabase().prepare(`UPDATE city_places SET city=?,name=?,type=?,district=?,lat=?,lng=?,note=?,
+    draft=?,updated_at=? WHERE id=?`).run(
+    input.city, input.name, input.type, input.district ?? null, input.lat, input.lng,
+    input.note ?? null, input.draft ? 1 : 0, new Date().toISOString(), id,
+  );
+}
+
+export function deleteCityPlace(id: string) {
+  getDatabase().prepare('DELETE FROM city_places WHERE id=?').run(id);
+}
+
+export function listCityPlacePhotoIds(placeId: string) {
+  const rows = getDatabase().prepare('SELECT id FROM city_photos WHERE place_id=?').all(placeId) as Row[];
+  return rows.map((row) => String(row.id));
+}
+
+export function addCityPhotoRecord(photo: Omit<CityPhoto, 'createdAt'>) {
+  const db = getDatabase();
+  const count = Number((db.prepare('SELECT COUNT(*) AS count FROM city_photos WHERE place_id=?').get(photo.placeId) as Row).count);
+  db.prepare(`INSERT INTO city_photos
+    (id,place_id,original_path,variants,alt,caption,featured,created_at,sort_order)
+    VALUES (?,?,?,?,?,?,?,?,?)`).run(
+    photo.id, photo.placeId, photo.originalPath, JSON.stringify(photo.variants), photo.alt,
+    photo.caption ?? null, count === 0 || photo.featured ? 1 : 0, new Date().toISOString(), count + 1,
+  );
+}
+
+export function getCityPlaceContext(placeId: string) {
+  return getDatabase().prepare('SELECT id,city,name FROM city_places WHERE id=?').get(placeId) as
+    { id: string; city: string; name: string } | undefined;
+}
+
+export function getCityPhoto(photoId: string) {
+  const row = getDatabase().prepare('SELECT * FROM city_photos WHERE id=?').get(photoId) as Row | undefined;
+  return row ? rowToCityPhoto(row) : undefined;
+}
+
+export function deleteCityPhotoRecord(photoId: string) {
+  const db = getDatabase();
+  const photo = db.prepare('SELECT place_id,featured FROM city_photos WHERE id=?').get(photoId) as Row | undefined;
+  if (!photo) return;
+  db.exec('BEGIN');
+  try {
+    db.prepare('DELETE FROM city_photos WHERE id=?').run(photoId);
+    if (photo.featured) {
+      const next = db.prepare(`SELECT id FROM city_photos WHERE place_id=?
+        ORDER BY sort_order IS NULL,sort_order,created_at LIMIT 1`).get(String(photo.place_id)) as Row | undefined;
+      if (next) db.prepare('UPDATE city_photos SET featured=1 WHERE id=?').run(String(next.id));
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+export function reorderCityPhotos(placeId: string, photoIds: string[]) {
+  const db = getDatabase();
+  const stmt = db.prepare('UPDATE city_photos SET sort_order=? WHERE id=? AND place_id=?');
+  db.exec('BEGIN');
+  try {
+    photoIds.forEach((id, index) => stmt.run(index + 1, id, placeId));
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+export function setCityCoverPhoto(placeId: string, photoId: string) {
+  const db = getDatabase();
+  const photo = db.prepare('SELECT id FROM city_photos WHERE id=? AND place_id=?').get(photoId, placeId);
+  if (!photo) return false;
+  db.exec('BEGIN');
+  try {
+    db.prepare('UPDATE city_photos SET featured=0 WHERE place_id=?').run(placeId);
+    db.prepare('UPDATE city_photos SET featured=1 WHERE id=?').run(photoId);
+    db.exec('COMMIT');
+    return true;
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
 }

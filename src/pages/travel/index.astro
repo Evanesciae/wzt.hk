@@ -11,7 +11,7 @@ const airports = new Set(flights.flatMap((flight) => [flight.fromAirport.code, f
 
 <BaseLayout title="旅行" description="旅行计划、清单与途中记录。">
   <div class="container page-shell">
-    <PageHeader eyebrow="TRAVEL PLANS" title="旅行" description="把期待、路线和仍待确认的小事放在同一个地方。" count={trips.length} />
+    <PageHeader eyebrow="TRAVEL PLANS" title="旅行" count={trips.length} />
 
     <a class="travel-tool-card" href="/travel/flights/">
       <div>

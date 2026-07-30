@@ -1,0 +1,34 @@
+---
+import 'maplibre-gl/dist/maplibre-gl.css';
+
+interface Props { name: string; lat: number; lng: number }
+const { name, lat, lng } = Astro.props;
+---
+
+<div class="city-detail-map" data-city-detail-map data-name={name} data-lat={lat} data-lng={lng}>
+  <div data-map-canvas aria-label={`${name}地图位置`}></div>
+</div>
+
+<script>
+  document.querySelectorAll<HTMLElement>('[data-city-detail-map]').forEach(async (root) => {
+    if (root.dataset.ready) return;
+    root.dataset.ready = 'true';
+    const canvas = root.querySelector<HTMLElement>('[data-map-canvas]');
+    const lat = Number(root.dataset.lat);
+    const lng = Number(root.dataset.lng);
+    if (!canvas || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    const { default: maplibregl } = await import('maplibre-gl');
+    const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const map = new maplibregl.Map({
+      container: canvas,
+      style: `https://tiles.openfreemap.org/styles/${dark ? 'dark' : 'positron'}`,
+      center: [lng, lat],
+      zoom: 13.5,
+      cooperativeGestures: true,
+    });
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+    const marker = document.createElement('span');
+    marker.className = 'city-map-marker city-detail-marker';
+    new maplibregl.Marker({ element: marker }).setLngLat([lng, lat]).addTo(map);
+  });
+</script>

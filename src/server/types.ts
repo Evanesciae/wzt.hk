@@ -15,6 +15,7 @@ export interface Airport {
 export interface Flight {
   id: string;
   date: string;
+  datePrecision?: 'day' | 'month';
   flightNumber: string;
   airlineCode?: string;
   airlineName?: string;
@@ -53,6 +54,35 @@ export interface KbNote {
 }
 
 export interface PhotoVariant { width: number; height: number; path: string; size: number }
+
+export type CitySlug = 'hong-kong' | 'singapore';
+
+export interface CityPhoto {
+  id: string;
+  placeId: string;
+  originalPath: string;
+  variants: PhotoVariant[];
+  alt: string;
+  caption?: string;
+  featured: boolean;
+  createdAt: string;
+  sortOrder?: number | null;
+}
+
+export interface CityPlace {
+  id: string;
+  city: CitySlug;
+  name: string;
+  type: string;
+  district?: string;
+  lat: number;
+  lng: number;
+  note?: string;
+  sortOrder: number;
+  draft: boolean;
+  updatedAt: string;
+  photos: CityPhoto[];
+}
 
 export interface TravelPhoto {
   id: string;
@@ -99,7 +129,7 @@ export interface TravelEvent {
 export interface TravelDay {
   id: string;
   tripId: string;
-  date: string;
+  date?: string;
   city: string;
   title?: string;
   summary?: string;
@@ -112,8 +142,9 @@ export interface TravelTrip {
   title: string;
   destination: string;
   status: TripStatus;
-  startDate: string;
-  endDate: string;
+  startDate?: string;
+  endDate?: string;
+  datesTbd: boolean;
   summary: string;
   pendingItems: string[];
   body: string;
