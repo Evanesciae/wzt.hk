@@ -13,7 +13,7 @@ export const PATCH: APIRoute = async ({ params, request }) => {
   let body: Record<string, any>;
   try { body = await request.json(); } catch { return Response.json({ error: 'BAD_REQUEST' }, { status: 400 }); }
   if (!body.title?.trim() || !types.has(body.type)) return Response.json({ error: 'INVALID_EVENT' }, { status: 422 });
-  updateEvent(id, {
+  await updateEvent(id, {
     type: body.type, title: String(body.title).trim(), time: body.time || undefined,
     timeSource: timeSource(body),
     note: body.note || undefined, location: parseLocation(body), data: body.data && typeof body.data === 'object' ? body.data : {},
@@ -23,7 +23,7 @@ export const PATCH: APIRoute = async ({ params, request }) => {
 
 export const DELETE: APIRoute = async ({ params }) => {
   if (!params.id) return Response.json({ error: 'NOT_FOUND' }, { status: 404 });
-  for (const photo of listEventPhotos(params.id)) await deletePhotoFiles(photo.id);
-  deleteEvent(params.id);
+  for (const photo of await listEventPhotos(params.id)) await deletePhotoFiles(photo.id);
+  await deleteEvent(params.id);
   return Response.json({ ok: true });
 };

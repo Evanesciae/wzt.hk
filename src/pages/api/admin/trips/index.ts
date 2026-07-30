@@ -15,7 +15,7 @@ export const POST: APIRoute = async ({ request }) => {
     return Response.json({ error: 'INVALID_TRIP' }, { status: 422 });
   }
   try {
-    createTrip({
+    await createTrip({
       id, title: String(body.title).trim(), destination: String(body.destination).trim(), status: body.status,
       startDate: datesTbd ? undefined : String(body.startDate),
       endDate: datesTbd ? undefined : String(body.endDate),

@@ -5,7 +5,7 @@ import CityExplorer from '../../components/CityExplorer.astro';
 import { cities } from '../../data/cities';
 import { listCityPlaces } from '../../server/database';
 
-const places = listCityPlaces();
+const places = await listCityPlaces();
 ---
 
 <BaseLayout title="城市探索">

@@ -6,7 +6,7 @@ export const POST: APIRoute = async ({ request }) => {
   try { body = await request.json(); } catch { return Response.json({ error: 'BAD_REQUEST' }, { status: 400 }); }
   if (!body.tripId || (!body.dateTbd && !body.date) || !body.city?.trim()) return Response.json({ error: 'INVALID_DAY' }, { status: 422 });
   try {
-    const id = createDay(String(body.tripId), {
+    const id = await createDay(String(body.tripId), {
       date: body.dateTbd ? undefined : String(body.date), city: String(body.city).trim(),
       title: body.title?.trim() || undefined, summary: body.summary?.trim() || undefined,
     });

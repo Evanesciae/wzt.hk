@@ -2,7 +2,7 @@
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import { listTrips } from '../../server/database';
 
-const trips = listTrips(true);
+const trips = await listTrips(true);
 ---
 
 <BaseLayout title="管理中心">

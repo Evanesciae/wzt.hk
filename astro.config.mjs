@@ -1,10 +1,13 @@
 import { defineConfig } from 'astro/config';
-import node from '@astrojs/node';
+import cloudflare from '@astrojs/cloudflare';
 
 export default defineConfig({
   site: 'https://wzt.hk',
   output: 'server',
-  adapter: node({ mode: 'standalone' }),
+  adapter: cloudflare({
+    imageService: 'cloudflare-binding',
+    sessionKVBindingName: 'SESSION',
+  }),
   build: {
     format: 'directory',
   },

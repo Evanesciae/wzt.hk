@@ -4,7 +4,7 @@ import BaseLayout from '../../../layouts/BaseLayout.astro';
 import { getTrip } from '../../../server/database';
 
 const slug = Astro.params.slug;
-const trip = slug ? getTrip(slug, true) : undefined;
+const trip = slug ? await getTrip(slug, true) : undefined;
 if (!trip) return Astro.redirect('/404');
 const csrf = Astro.locals.adminSession?.csrfToken ?? '';
 const typeLabels = { place: '地点', transit: '交通', meal: '餐饮', stay: '住宿', note: '事件' } as const;

@@ -7,9 +7,9 @@ export const PATCH: APIRoute = async ({ params, request }) => {
   if (!id) return Response.json({ error: 'NOT_FOUND' }, { status: 404 });
   let body: { featured?: unknown };
   try { body = await request.json(); } catch { return Response.json({ error: 'BAD_REQUEST' }, { status: 400 }); }
-  const photo = getCityPhoto(id);
+  const photo = await getCityPhoto(id);
   if (!photo) return Response.json({ error: 'NOT_FOUND' }, { status: 404 });
-  if (body.featured !== true || !setCityCoverPhoto(photo.placeId, id)) {
+  if (body.featured !== true || !await setCityCoverPhoto(photo.placeId, id)) {
     return Response.json({ error: 'INVALID_UPDATE' }, { status: 422 });
   }
   return Response.json({ ok: true });

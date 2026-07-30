@@ -1,0 +1,37 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "wzt-hk-preview",
+  "main": "@astrojs/cloudflare/entrypoints/server",
+  "compatibility_date": "2026-07-29",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "./dist"
+  },
+  "cache": {
+    "enabled": true
+  },
+  "observability": {
+    "enabled": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "wzt-hk-preview",
+      "database_id": "c09cb369-431f-4aef-bdc3-d4f88e30b1d9",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "wzt-hk-media-preview"
+    }
+  ],
+  "vars": {
+    "APP_TIME_ZONE": "Asia/Hong_Kong",
+    "ADMIN_USERNAME": "admin",
+    "AI_BASE_URL": "https://api.deepseek.com",
+    "AI_MODEL": "deepseek-chat"
+  }
+}

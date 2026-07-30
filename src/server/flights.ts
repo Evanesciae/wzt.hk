@@ -1,5 +1,14 @@
+import { env } from 'cloudflare:workers';
 import { fallbackAirport, seedAirports } from './airports';
 import type { Airport, Flight } from './types';
+
+type FlightBindings = {
+  AVIATIONSTACK_API_KEY?: string;
+};
+
+export function isFlightProviderConfigured() {
+  return Boolean((env as unknown as FlightBindings).AVIATIONSTACK_API_KEY);
+}
 
 export interface FlightSearchResult extends Omit<Flight, 'id' | 'createdAt' | 'updatedAt'> {
   providerId: string;
@@ -99,7 +108,7 @@ function normalizeAviationstack(item: any, fallbackDate: string): FlightSearchRe
 }
 
 export async function searchFlights(flightNumber: string, date: string): Promise<FlightSearchResult[]> {
-  const key = process.env.AVIATIONSTACK_API_KEY;
+  const key = (env as unknown as FlightBindings).AVIATIONSTACK_API_KEY;
   if (!key) return demoFlights(flightNumber, date);
   const url = new URL('https://api.aviationstack.com/v1/flights');
   url.searchParams.set('access_key', key);

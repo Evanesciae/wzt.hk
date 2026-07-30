@@ -5,7 +5,7 @@ import { getFlight } from '../../../server/database';
 import { formatFlightDate } from '../../../lib/content';
 
 const id = Astro.params.id;
-const flight = id ? getFlight(id) : undefined;
+const flight = id ? await getFlight(id) : undefined;
 if (!flight) return Astro.redirect('/404');
 
 function time(value?: string) {

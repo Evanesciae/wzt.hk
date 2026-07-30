@@ -16,7 +16,7 @@ export const POST: APIRoute = async ({ request }) => {
     return Response.json({ error: 'INVALID_PLACE' }, { status: 422 });
   }
   try {
-    createCityPlace({
+    await createCityPlace({
       id,
       city,
       name: String(body.name).trim(),

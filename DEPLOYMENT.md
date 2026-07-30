@@ -1,115 +1,110 @@
-# wzt.hk 服务端部署
+# Cloudflare deployment
 
-项目现在是 Astro Node SSR 应用。旅行与知识库数据保存在 SQLite，照片原图与网页版本保存在持久化数据卷中。Links 仍从仓库内容构建。
+The application runs on Cloudflare Workers. Runtime data is split across:
 
-## 服务器要求
+- D1 (`DB`) for trips, knowledge-base entries, flights, cities, users, and sessions.
+- R2 (`MEDIA`) for original photos.
+- Cloudflare Images (`IMAGES`) for on-demand responsive WebP variants.
+- Workers KV (`SESSION`) for Astro session support.
 
-- 64 位 Linux VPS
-- 2 核 CPU、2–4 GB 内存
-- Docker Engine 与 Docker Compose
-- 至少 40 GB 磁盘，照片较多时增加数据盘
-- 80、443 端口可以从公网访问
+The current preview resources are declared in `wrangler.jsonc`. They are intentionally separate from the production domain.
 
-DNS 中将 `wzt.hk` 和 `www.wzt.hk` 的 A/AAAA 记录指向服务器。Caddy 会自动申请 HTTPS 证书。
+## Release flow
 
-## 首次部署
+Develop continuously; the site does not need to be “finished” before deployment.
 
-在自己的电脑生成密码哈希：
+1. Work on a feature branch and run `npm run check && npm run build`.
+2. Deploy to the preview Worker with `npm run cf:deploy`.
+3. Review the preview URL.
+4. Merge the reviewed branch to `main`.
+5. Deploy the reviewed commit, then attach the production domain only when it is ready.
 
-```bash
-npm run admin:password -- "一条足够长且唯一的密码"
-```
+GitHub stores source code and migration files. D1 and R2 remain the runtime source of truth and must be backed up separately.
 
-服务器上复制环境变量模板：
+## First-time setup
 
-```bash
-cp .env.example .env.production
-```
-
-编辑 `.env.production`：
-
-```env
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD_HASH=上一步生成的完整字符串
-
-# 可选：AI 助手（DeepSeek，OpenAI 兼容）。不填则后台 AI 按钮/行程生成器返回「未配置」，站点其余功能正常。
-AI_API_KEY=
-AI_BASE_URL=https://api.deepseek.com
-AI_MODEL=deepseek-chat
-```
-
-`.env.production` 不要提交到 Git。随后启动：
+Authenticate and create the Cloudflare resources:
 
 ```bash
-docker compose up -d --build
+npx wrangler login
+npx wrangler d1 create wzt-hk-preview
+npx wrangler r2 bucket create wzt-hk-media-preview
 ```
 
-首次访问时，数据库会从 `src/content/travel/` 与 `src/content/kb/` 自动导入现有行程与笔记。之后管理端的修改以 SQLite 为准。
-
-- 公开站：`https://wzt.hk`
-- 管理端：`https://wzt.hk/admin`
-
-## 数据目录
-
-Docker 卷 `wzt_data` 包含：
-
-```text
-/data/wzt.db                 SQLite 数据库
-/data/media/originals/       私有原图，不通过公开 URL 提供
-/data/media/public/          自动生成的网页图片
-```
-
-上传限制为单张 100 MB。JPEG、PNG、WebP、TIFF 可直接处理；Docker 镜像包含 HEIC/HEIF 转换工具。公开图片会自动纠正方向、移除 EXIF，并生成 640、1280、2048 和最高 4096px 的高质量 JPEG。
-
-## 更新代码
+Copy the returned D1 database ID into `wrangler.jsonc`, then apply the schema:
 
 ```bash
-git pull
-docker compose up -d --build
+npm run cf:migrate:remote
 ```
 
-持久化卷不会因重新构建镜像而删除。不要运行 `docker compose down -v`，其中 `-v` 会删除数据卷。
-
-服务器上也可用一键脚本：
+For an existing SQLite database, export a D1-compatible data-only SQL file and import it with:
 
 ```bash
-./scripts/deploy.sh   # 等价于 git pull && docker compose up -d --build && docker image prune -f
+npx wrangler d1 execute DB --remote --file=/path/to/data.sql
 ```
 
-### 自动部署（可选）
-
-`.github/workflows/deploy.yml` 提供经 SSH 的远程部署，默认**手动触发**（仓库 Actions → deploy → Run workflow）。先在仓库 Secrets 配置 `SERVER_HOST`、`SERVER_USER`、`SSH_PRIVATE_KEY`、`SERVER_PATH`。想改成 push 到 main 即部署，把 workflow 的 `on` 加上 `push: branches: [main]`。建议手动跑稳定后再开自动。
-
-### 改配置不改代码
-
-只改服务器上的 `.env.production`（如补 `AI_API_KEY`、换密码）时，无需重建镜像：
+Upload the existing originals once:
 
 ```bash
-docker compose up -d   # 重建容器读取新 env
+npm run cf:upload-media
 ```
 
-## 备份
+The upload script only sends `data/media/originals/`. Legacy thumbnails are generated from the originals on demand.
 
-手动备份：
+## Secrets
+
+Set a Workers-compatible password hash without exposing the password in shell history:
 
 ```bash
-docker compose exec app npm run backup
+npm run cf:set-admin-password
 ```
 
-备份会写到宿主机的 `./backups/`。建议再使用 restic、rsync 或服务器快照，将该目录复制到另一台机器或对象存储。至少每天备份一次，并定期验证恢复。
+Optional integrations should also be stored as secrets, never committed:
 
-## 上线前检查
+```bash
+npx wrangler secret put AI_API_KEY
+npx wrangler secret put AVIATIONSTACK_API_KEY
+```
+
+Non-secret settings such as `ADMIN_USERNAME`, `APP_TIME_ZONE`, `AI_BASE_URL`, and `AI_MODEL` can be declared under `vars` in `wrangler.jsonc`.
+
+## Local Cloudflare development
+
+Apply the local D1 migration and start Wrangler:
+
+```bash
+npm run cf:migrate:local
+npm run cf:dev
+```
+
+Local runtime secrets belong in `.dev.vars`, which is ignored by Git.
+
+## Deploy and verify
 
 ```bash
 npm run check
 npm run build
-docker compose config
+npm run cf:deploy
 ```
 
-同时确认：
+Verify the public pages, `/admin/login`, one D1-backed detail page, and at least one `/media/` image after every migration.
 
-- 使用了唯一的强密码；
-- `.env.production` 没有进入 Git；
-- DNS 已生效；
-- 云服务器防火墙只开放 SSH、80 和 443；
-- 已配置异地备份。
+## GitHub
+
+`.github/workflows/ci.yml` validates every pull request and push to `main`. Keep deployment manual until the preview is approved. After that, connect the Worker to the GitHub repository from Cloudflare Workers → Settings → Builds, using:
+
+- Build command: `npm run build`
+- Deploy command: `npx wrangler deploy`
+- Production branch: `main`
+
+Do not connect automatic deployment while `main` still contains the previous Node/SQLite implementation.
+
+## Backups
+
+Export D1 regularly:
+
+```bash
+npx wrangler d1 export DB --remote --output=backups/wzt-d1.sql
+```
+
+Keep an independent copy of the R2 originals. Test restoring both the D1 export and a sample of R2 objects before switching the production domain.

@@ -17,7 +17,7 @@ export const PATCH: APIRoute = async ({ params, request }) => {
     return Response.json({ error: 'INVALID_PLACE' }, { status: 422 });
   }
   try {
-    updateCityPlace(id, {
+    await updateCityPlace(id, {
       city,
       name: String(body.name).trim(),
       type: String(body.type).trim(),
@@ -38,8 +38,8 @@ export const DELETE: APIRoute = async ({ params }) => {
   const id = params.id;
   if (!id) return Response.json({ error: 'NOT_FOUND' }, { status: 404 });
   try {
-    for (const photoId of listCityPlacePhotoIds(id)) await deleteCityPhotoFiles(photoId);
-    deleteCityPlace(id);
+    for (const photoId of await listCityPlacePhotoIds(id)) await deleteCityPhotoFiles(photoId);
+    await deleteCityPlace(id);
     return Response.json({ ok: true });
   } catch (error) {
     console.error(error);

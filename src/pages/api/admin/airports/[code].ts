@@ -4,7 +4,7 @@ import { deleteAirport } from '../../../../server/database';
 export const DELETE: APIRoute = async ({ params }) => {
   if (!params.code) return Response.json({ error: 'NOT_FOUND' }, { status: 404 });
   try {
-    deleteAirport(params.code);
+    await deleteAirport(params.code);
     return Response.json({ ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'DELETE_FAILED';

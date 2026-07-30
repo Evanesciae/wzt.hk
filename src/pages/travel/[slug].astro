@@ -9,11 +9,11 @@ import { getTrip } from '../../server/database';
 import { getSession } from '../../server/auth';
 
 const slug = Astro.params.slug;
-const entry = slug ? getTrip(slug) : undefined;
+const entry = slug ? await getTrip(slug) : undefined;
 if (!entry) return Astro.redirect('/404');
 const date = (value: string) => new Date(`${value}T00:00:00`);
 const overviewHtml = entry.body ? marked.parse(entry.body) : '';
-const admin = getSession(Astro.cookies);
+const admin = await getSession(Astro.cookies);
 const days = entry.days;
 const dayLabel = (day: typeof days[number], index: number) => entry.datesTbd || !day.date
   ? `Day ${index + 1}`

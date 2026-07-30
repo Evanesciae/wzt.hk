@@ -4,8 +4,7 @@ import { listFlights, listTrips } from '../../server/database';
 import { airlineNames } from '../../server/airlines';
 import { formatFlightDate } from '../../lib/content';
 
-const flights = listFlights();
-const trips = listTrips(true);
+const [flights, trips] = await Promise.all([listFlights(), listTrips(true)]);
 ---
 
 <BaseLayout title="飞行日记管理">

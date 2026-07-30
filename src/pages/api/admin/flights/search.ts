@@ -1,5 +1,5 @@
 import type { APIRoute } from 'astro';
-import { searchFlights } from '../../../../server/flights';
+import { isFlightProviderConfigured, searchFlights } from '../../../../server/flights';
 
 export const POST: APIRoute = async ({ request }) => {
   let body: Record<string, any>;
@@ -10,7 +10,7 @@ export const POST: APIRoute = async ({ request }) => {
   try {
     const results = await searchFlights(flightNumber, date);
     return Response.json({
-      provider: process.env.AVIATIONSTACK_API_KEY ? 'aviationstack' : 'demo',
+      provider: isFlightProviderConfigured() ? 'aviationstack' : 'demo',
       results,
     });
   } catch (error) {

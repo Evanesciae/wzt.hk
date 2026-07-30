@@ -10,7 +10,7 @@ export const PATCH: APIRoute = async ({ params, request }) => {
     return Response.json({ error: 'INVALID_NOTE' }, { status: 422 });
   }
   try {
-    updateKbNote(id, {
+    await updateKbNote(id, {
       title: String(body.title).trim(), summary: String(body.summary).trim(), category: String(body.category),
       tags: Array.isArray(body.tags) ? body.tags.filter((t: unknown) => typeof t === 'string') : [],
       body: typeof body.body === 'string' ? body.body : '', draft: Boolean(body.draft), featured: Boolean(body.featured), strict: Boolean(body.strict),
@@ -24,6 +24,6 @@ export const PATCH: APIRoute = async ({ params, request }) => {
 
 export const DELETE: APIRoute = async ({ params }) => {
   if (!params.id) return Response.json({ error: 'NOT_FOUND' }, { status: 404 });
-  deleteKbNote(params.id);
+  await deleteKbNote(params.id);
   return Response.json({ ok: true });
 };

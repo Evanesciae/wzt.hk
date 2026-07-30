@@ -4,8 +4,7 @@ import PageHeader from '../../components/PageHeader.astro';
 import TravelCard from '../../components/TravelCard.astro';
 import { listFlights, listTrips } from '../../server/database';
 
-const trips = listTrips();
-const flights = listFlights();
+const [trips, flights] = await Promise.all([listTrips(), listFlights()]);
 const airports = new Set(flights.flatMap((flight) => [flight.fromAirport.code, flight.toAirport.code]));
 ---
 

@@ -7,3 +7,5 @@ backups/
 航班/
 .env
 .env.production
+.dev.vars*
+.wrangler/

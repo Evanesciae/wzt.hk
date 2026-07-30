@@ -9,7 +9,7 @@ export const POST: APIRoute = async ({ request }) => {
     return Response.json({ error: 'INVALID_FLIGHT' }, { status: 422 });
   }
   try {
-    const id = upsertFlight(body);
+    const id = await upsertFlight(body);
     return Response.json({ ok: true, id }, { status: 201 });
   } catch (error) {
     console.error(error);

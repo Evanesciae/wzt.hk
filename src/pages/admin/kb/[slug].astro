@@ -4,7 +4,7 @@ import { getKbNote } from '../../../server/database';
 import { kbCategories } from '../../../lib/content';
 
 const slug = Astro.params.slug;
-const note = slug ? getKbNote(slug, true) : undefined;
+const note = slug ? await getKbNote(slug, true) : undefined;
 if (!note) return Astro.redirect('/404');
 const csrf = Astro.locals.adminSession?.csrfToken ?? '';
 ---

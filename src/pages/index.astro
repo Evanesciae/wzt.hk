@@ -5,9 +5,7 @@ import KbCard from '../components/KbCard.astro';
 import TravelCard from '../components/TravelCard.astro';
 import { listFlights, listKbNotes, listTrips } from '../server/database';
 
-const notes = listKbNotes();
-const trips = listTrips();
-const flights = listFlights();
+const [notes, trips, flights] = await Promise.all([listKbNotes(), listTrips(), listFlights()]);
 const links = (await getCollection('links')).sort((a, b) => a.data.order - b.data.order);
 const currentTrip = trips.find((trip) => trip.status === 'upcoming')
   ?? trips.find((trip) => trip.status === 'planning');

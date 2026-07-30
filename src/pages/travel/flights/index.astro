@@ -5,7 +5,7 @@ import FlightMap from '../../../components/FlightMap.astro';
 import { listFlights } from '../../../server/database';
 import { formatFlightDate } from '../../../lib/content';
 
-const flights = listFlights();
+const flights = await listFlights();
 const airports = new Set(flights.flatMap((flight) => [flight.fromAirport.code, flight.toAirport.code]));
 const totalDistance = flights.reduce((total, flight) => total + (flight.distanceKm ?? 0), 0);
 const totalDuration = flights.reduce((total, flight) => total + (flight.durationMinutes ?? 0), 0);

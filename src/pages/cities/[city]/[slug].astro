@@ -9,9 +9,9 @@ import { getSession } from '../../../server/auth';
 
 const city = Astro.params.city;
 const slug = Astro.params.slug;
-const place = city && slug ? getCityPlaceByRoute(city, slug) : undefined;
+const place = city && slug ? await getCityPlaceByRoute(city, slug) : undefined;
 if (!place) return Astro.redirect('/404');
-const admin = getSession(Astro.cookies);
+const admin = await getSession(Astro.cookies);
 const noteHtml = place.note ? marked.parse(place.note) : '';
 ---
 

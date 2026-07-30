@@ -17,7 +17,7 @@ export const PATCH: APIRoute = async ({ params, request }) => {
   }
   const pendingItems = Array.isArray(body.pendingItems) ? body.pendingItems.filter((item): item is string => typeof item === 'string') : [];
   try {
-    updateTrip(id, {
+    await updateTrip(id, {
       title: String(body.title).trim(), destination: String(body.destination).trim(), status: body.status,
       startDate: datesTbd ? undefined : String(body.startDate),
       endDate: datesTbd ? undefined : String(body.endDate),
@@ -34,7 +34,7 @@ export const PATCH: APIRoute = async ({ params, request }) => {
 export const DELETE: APIRoute = async ({ params }) => {
   const id = params.id;
   if (!id) return Response.json({ error: 'NOT_FOUND' }, { status: 404 });
-  for (const photoId of listTripPhotoIds(id)) await deletePhotoFiles(photoId);
-  deleteTrip(id);
+  for (const photoId of await listTripPhotoIds(id)) await deletePhotoFiles(photoId);
+  await deleteTrip(id);
   return Response.json({ ok: true });
 };

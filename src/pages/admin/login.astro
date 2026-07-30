@@ -2,7 +2,7 @@
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import { getSession } from '../../server/auth';
 
-if (getSession(Astro.cookies)) return Astro.redirect('/admin');
+if (await getSession(Astro.cookies)) return Astro.redirect('/admin');
 const next = Astro.url.searchParams.get('next') || '/admin';
 ---
 
