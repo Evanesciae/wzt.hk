@@ -21,50 +21,96 @@ const firstMappableDay = days.find((day) => day.points.length > 0) ?? days[0];
 ---
 
 <aside class="trip-map" data-trip-map data-days={JSON.stringify(days)}>
-  <div class="trip-map-heading">
-    <div>
-      <p class="eyebrow">DAILY MAP</p>
-      <h2 data-map-title>{firstMappableDay?.label}</h2>
+  <div class="trip-map-inline" data-map-inline>
+    <div class="trip-map-heading">
+      <div>
+        <p class="eyebrow">DAILY MAP</p>
+        <h2 data-map-title>{firstMappableDay?.label}</h2>
+      </div>
+      <span data-map-city>{firstMappableDay?.city}</span>
     </div>
-    <span data-map-city>{firstMappableDay?.city}</span>
+    <div class="map-frame">
+      <div class="map-canvas" data-map-canvas aria-label="每日地点地图"></div>
+      <div class="map-empty" data-map-empty hidden>这一天还没有地点坐标。</div>
+    </div>
+    <p class="map-caption">点位依照时间线顺序连接，不代表实际导航路线。</p>
   </div>
-  <div class="map-frame">
-    <div class="map-canvas" data-map-canvas aria-label="每日地点地图"></div>
-    <div class="map-empty" data-map-empty hidden>这一天还没有地点坐标。</div>
-  </div>
-  <p class="map-caption">点位依照时间线顺序连接，不代表实际导航路线。</p>
+
+  <button
+    class="trip-map-dock"
+    type="button"
+    data-map-dock
+    aria-controls="trip-map-dialog"
+    aria-expanded="false"
+  >
+    <span class="trip-map-dock-label">地图</span>
+    <strong data-map-dock-title>{firstMappableDay?.label}</strong>
+    <span data-map-dock-city>{firstMappableDay?.city}</span>
+    <span class="trip-map-dock-action">展开 ↑</span>
+  </button>
+
+  <dialog class="trip-map-dialog" id="trip-map-dialog" data-map-dialog aria-labelledby="trip-map-dialog-title">
+    <div class="trip-map-dialog-shell">
+      <header class="trip-map-dialog-header">
+        <div>
+          <p class="eyebrow">DAILY MAP</p>
+          <h2 id="trip-map-dialog-title" data-map-dialog-title>{firstMappableDay?.label}</h2>
+          <span data-map-dialog-city>{firstMappableDay?.city}</span>
+        </div>
+        <div class="trip-map-dialog-actions">
+          <button type="button" data-map-dialog-fullscreen>铺满窗口</button>
+          <button type="button" data-map-dialog-close>关闭</button>
+        </div>
+      </header>
+      <div class="map-frame">
+        <div class="map-canvas" data-map-dialog-canvas aria-label="展开的每日地点地图"></div>
+        <div class="map-empty" data-map-dialog-empty hidden>这一天还没有地点坐标。</div>
+      </div>
+      <p class="map-caption">点位依照时间线顺序连接，不代表实际导航路线。</p>
+    </div>
+  </dialog>
 </aside>
 
 <script>
-  import type { GeoJSONSource, Marker } from 'maplibre-gl';
+  import type { GeoJSONSource, Map as MapLibreMap, Marker } from 'maplibre-gl';
 
   interface MapPoint { lat: number; lng: number; title: string; marker: string }
   interface MapDay { id: string; label: string; city: string; points: MapPoint[] }
+  interface MapState {
+    map: MapLibreMap;
+    canvas: HTMLElement;
+    empty?: HTMLElement;
+    markers: Marker[];
+    activeDayId: string;
+    loaded: boolean;
+  }
 
   document.querySelectorAll<HTMLElement>('[data-trip-map]').forEach(async (root) => {
     if (root.dataset.ready) return;
     root.dataset.ready = 'true';
     const days: MapDay[] = JSON.parse(root.dataset.days ?? '[]');
-    const canvas = root.querySelector<HTMLElement>('[data-map-canvas]');
-    const empty = root.querySelector<HTMLElement>('[data-map-empty]');
+    const inline = root.querySelector<HTMLElement>('[data-map-inline]');
+    const canvas = inline?.querySelector<HTMLElement>('[data-map-canvas]');
+    const empty = inline?.querySelector<HTMLElement>('[data-map-empty]');
     const title = root.querySelector<HTMLElement>('[data-map-title]');
     const city = root.querySelector<HTMLElement>('[data-map-city]');
-    if (!canvas || days.length === 0) return;
-    const mapCanvas = canvas;
-    const { default: maplibregl } = await import('maplibre-gl');
+    const dock = root.querySelector<HTMLButtonElement>('[data-map-dock]');
+    const dockTitle = root.querySelector<HTMLElement>('[data-map-dock-title]');
+    const dockCity = root.querySelector<HTMLElement>('[data-map-dock-city]');
+    const dialog = root.querySelector<HTMLDialogElement>('[data-map-dialog]');
+    const dialogCanvas = root.querySelector<HTMLElement>('[data-map-dialog-canvas]');
+    const dialogEmpty = root.querySelector<HTMLElement>('[data-map-dialog-empty]');
+    const dialogTitle = root.querySelector<HTMLElement>('[data-map-dialog-title]');
+    const dialogCity = root.querySelector<HTMLElement>('[data-map-dialog-city]');
+    const dialogClose = root.querySelector<HTMLButtonElement>('[data-map-dialog-close]');
+    const dialogFullscreen = root.querySelector<HTMLButtonElement>('[data-map-dialog-fullscreen]');
+    if (!inline || !canvas || days.length === 0) return;
 
+    const { default: maplibregl } = await import('maplibre-gl');
     const initialDay = days.find((day) => day.points.length > 0) ?? days[0];
     const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    const map = new maplibregl.Map({
-      container: mapCanvas,
-      style: `https://tiles.openfreemap.org/styles/${dark ? 'dark' : 'positron'}`,
-      center: initialDay.points[0] ? [initialDay.points[0].lng, initialDay.points[0].lat] : [121, 24],
-      zoom: 10,
-      cooperativeGestures: true,
-    });
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
-    let markers: Marker[] = [];
-    let activeDayId = '';
+    let currentDayId = initialDay.id;
+    let dialogState: MapState | undefined;
 
     function lineData(points: MapPoint[]): GeoJSON.FeatureCollection<GeoJSON.LineString> {
       return {
@@ -77,51 +123,151 @@ const firstMappableDay = days.find((day) => day.points.length > 0) ?? days[0];
       };
     }
 
-    function showDay(dayId: string) {
+    function fitDay(state: MapState, day: MapDay, duration: number) {
+      const bounds = new maplibregl.LngLatBounds();
+      day.points.forEach((point) => bounds.extend([point.lng, point.lat]));
+      if (day.points.length === 1) {
+        state.map.easeTo({ center: bounds.getCenter(), zoom: 13, duration });
+      } else {
+        state.map.fitBounds(bounds, { padding: 58, maxZoom: 13, duration });
+      }
+    }
+
+    function renderDay(state: MapState, dayId: string, duration = 650) {
       const day = days.find((item) => item.id === dayId) ?? days[0];
-      if (!day || day.id === activeDayId) return;
-      activeDayId = day.id;
-      if (title) title.textContent = day.label;
-      if (city) city.textContent = day.city;
-      markers.forEach((marker) => marker.remove());
-      markers = [];
-      if (empty) empty.hidden = day.points.length > 0;
-      mapCanvas.hidden = day.points.length === 0;
+      if (!day || !state.loaded || day.id === state.activeDayId) return;
+      state.activeDayId = day.id;
+      state.markers.forEach((marker) => marker.remove());
+      state.markers = [];
+      if (state.empty) state.empty.hidden = day.points.length > 0;
+      state.canvas.hidden = day.points.length === 0;
+      const source = state.map.getSource('day-route') as GeoJSONSource | undefined;
+      if (source) source.setData(lineData(day.points));
       if (day.points.length === 0) return;
 
+      state.map.resize();
       day.points.forEach((point) => {
         const element = document.createElement('button');
         element.className = 'map-number-marker';
         element.textContent = point.marker;
         element.type = 'button';
         element.title = point.title;
-        markers.push(new maplibregl.Marker({ element })
+        state.markers.push(new maplibregl.Marker({ element })
           .setLngLat([point.lng, point.lat])
           .setPopup(new maplibregl.Popup({ offset: 18 }).setText(point.title))
-          .addTo(map));
+          .addTo(state.map));
       });
-
-      const source = map.getSource('day-route') as GeoJSONSource | undefined;
-      if (source) source.setData(lineData(day.points));
-      const bounds = new maplibregl.LngLatBounds();
-      day.points.forEach((point) => bounds.extend([point.lng, point.lat]));
-      if (day.points.length === 1) map.easeTo({ center: bounds.getCenter(), zoom: 13, duration: 550 });
-      else map.fitBounds(bounds, { padding: 58, maxZoom: 13, duration: 650 });
+      fitDay(state, day, duration);
     }
 
-    map.on('load', () => {
-      map.addSource('day-route', { type: 'geojson', data: lineData([]) });
-      map.addLayer({
-        id: 'day-route',
-        type: 'line',
-        source: 'day-route',
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': dark ? '#b8c6c1' : '#4f625d', 'line-width': 2, 'line-opacity': .72, 'line-dasharray': [2, 2] },
+    function createMapState(mapCanvas: HTMLElement, mapEmpty: HTMLElement | undefined, cooperativeGestures: boolean) {
+      const map = new maplibregl.Map({
+        container: mapCanvas,
+        style: `https://tiles.openfreemap.org/styles/${dark ? 'dark' : 'positron'}`,
+        center: initialDay.points[0] ? [initialDay.points[0].lng, initialDay.points[0].lat] : [121, 24],
+        zoom: 10,
+        cooperativeGestures,
       });
-      activeDayId = '';
-      showDay(initialDay.id);
-    });
+      map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+      const state: MapState = {
+        map,
+        canvas: mapCanvas,
+        empty: mapEmpty,
+        markers: [],
+        activeDayId: '',
+        loaded: false,
+      };
+      map.on('load', () => {
+        map.addSource('day-route', { type: 'geojson', data: lineData([]) });
+        map.addLayer({
+          id: 'day-route',
+          type: 'line',
+          source: 'day-route',
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: { 'line-color': dark ? '#b8c6c1' : '#4f625d', 'line-width': 2, 'line-opacity': .72, 'line-dasharray': [2, 2] },
+        });
+        state.loaded = true;
+        state.activeDayId = '';
+        renderDay(state, currentDayId, 0);
+      });
+      return state;
+    }
+
+    const inlineState = createMapState(canvas, empty ?? undefined, true);
+
+    function showDay(dayId: string) {
+      const day = days.find((item) => item.id === dayId) ?? days[0];
+      if (!day) return;
+      currentDayId = day.id;
+      if (title) title.textContent = day.label;
+      if (city) city.textContent = day.city;
+      if (dockTitle) dockTitle.textContent = day.label;
+      if (dockCity) dockCity.textContent = day.city;
+      if (dialogTitle) dialogTitle.textContent = day.label;
+      if (dialogCity) dialogCity.textContent = day.city;
+      renderDay(inlineState, day.id);
+      if (dialogState) renderDay(dialogState, day.id);
+    }
+
+    const timeline = root.closest<HTMLElement>('.trip-timeline-section');
+    const mobileMap = window.matchMedia('(max-width: 820px)');
+    let dockTicking = false;
+    const updateDock = () => {
+      dockTicking = false;
+      const inlineRect = inline.getBoundingClientRect();
+      const timelineRect = timeline?.getBoundingClientRect();
+      const visible = mobileMap.matches
+        && inlineRect.bottom <= 58
+        && (!timelineRect || timelineRect.bottom > 72);
+      dock?.classList.toggle('is-visible', visible);
+      if (!mobileMap.matches && dialog?.open) dialog.close();
+    };
+    const scheduleDockUpdate = () => {
+      if (dockTicking) return;
+      dockTicking = true;
+      requestAnimationFrame(updateDock);
+    };
 
     document.addEventListener('travel-day-change', ((event: CustomEvent<string>) => showDay(event.detail)) as EventListener);
+    window.addEventListener('scroll', scheduleDockUpdate, { passive: true });
+    window.addEventListener('resize', scheduleDockUpdate);
+    mobileMap.addEventListener('change', scheduleDockUpdate);
+    updateDock();
+
+    dock?.addEventListener('click', () => {
+      if (!dialog || !dialogCanvas) return;
+      dialog.showModal();
+      dock.setAttribute('aria-expanded', 'true');
+      if (!dialogState) dialogState = createMapState(dialogCanvas, dialogEmpty ?? undefined, false);
+      requestAnimationFrame(() => {
+        if (!dialogState) return;
+        dialogState.map.resize();
+        dialogState.activeDayId = '';
+        renderDay(dialogState, currentDayId, 0);
+      });
+      setTimeout(() => dialogState?.map.resize(), 260);
+    });
+
+    dialogClose?.addEventListener('click', () => dialog?.close());
+    dialog?.addEventListener('click', (event) => {
+      if (event.target === dialog) dialog.close();
+    });
+    dialog?.addEventListener('close', () => {
+      dock?.setAttribute('aria-expanded', 'false');
+      dialog.classList.remove('is-fullscreen');
+      if (dialogFullscreen) dialogFullscreen.textContent = '铺满窗口';
+    });
+    dialogFullscreen?.addEventListener('click', () => {
+      if (!dialog || !dialogState) return;
+      const fullscreen = dialog.classList.toggle('is-fullscreen');
+      dialogFullscreen.textContent = fullscreen ? '退出全屏' : '铺满窗口';
+      requestAnimationFrame(() => {
+        if (!dialogState) return;
+        dialogState.map.resize();
+        dialogState.activeDayId = '';
+        renderDay(dialogState, currentDayId, 0);
+      });
+      setTimeout(() => dialogState?.map.resize(), 260);
+    });
   });
 </script>
