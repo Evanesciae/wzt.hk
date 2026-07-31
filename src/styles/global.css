@@ -616,6 +616,9 @@ button, input { font: inherit; }
   .trip-section-nav a { flex: 0 0 auto; }
   .trip-timeline-section { padding-top: 54px; }
   .map-frame { height: 300px; }
+  .trip-map-dialog-shell { padding: 16px 14px 10px; }
+  .trip-map-dialog-header { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .trip-map-dialog-actions { width: 100%; justify-content: flex-end; }
   .flight-map-frame { height: 380px; }
   .flight-stats { grid-template-columns: 1fr; }
   .flight-stats div { border-right: 0; border-bottom: 1px solid var(--line); }
