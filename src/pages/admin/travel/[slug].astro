@@ -158,6 +158,8 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
 
 <script>
   // @ts-nocheck
+  import { preparePhotoUploads } from '../../../lib/prepare-photo-uploads';
+
   const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '';
   const dialog = document.querySelector('[data-event-dialog]');
   const form = dialog?.querySelector('[data-event-form]');
@@ -499,20 +501,33 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
     const event = JSON.parse(card.dataset.event);
     card.dataset.uploading = 'true';
     card.classList.add('is-uploading');
-    updateProgress(0, `准备上传 ${files.length} 张原图…`);
-    const data = new FormData(); files.forEach((file) => data.append('photos', file));
-    const xhr = new XMLHttpRequest();
-    let streamOffset = 0;
-    let streamBuffer = '';
-    let completed = false;
     const finishWithError = (message) => {
       updateProgress(Number(percentText.textContent?.replace('%', '')) || 0, message);
       card.dataset.uploading = 'false';
       card.classList.remove('is-uploading');
     };
+    updateProgress(0, `准备上传 ${files.length} 张照片…`);
+    let prepared;
+    try {
+      prepared = await preparePhotoUploads(files, ({ index, total, fileName }) => {
+        updateProgress(index / total * 15, `图片超过处理限制，正在压缩：${fileName}`);
+      });
+    } catch (error) {
+      finishWithError(error instanceof Error ? error.message : '图片压缩失败。');
+      return;
+    }
+    if (prepared.compressedCount > 0) {
+      const saved = ((prepared.originalBytes - prepared.preparedBytes) / 1024 / 1024).toFixed(1);
+      updateProgress(15, `已按需压缩 ${prepared.compressedCount} 张，减少 ${saved} MB。`);
+    }
+    const data = new FormData(); prepared.files.forEach((file) => data.append('photos', file));
+    const xhr = new XMLHttpRequest();
+    let streamOffset = 0;
+    let streamBuffer = '';
+    let completed = false;
     const handleMessage = (message) => {
       if (message.type === 'progress') {
-        const visual = 35 + Number(message.overall ?? 0) * .65;
+        const visual = 40 + Number(message.overall ?? 0) * .6;
         let label = `正在处理第 ${message.fileIndex}/${message.totalFiles} 张：${message.fileName}`;
         if (message.stage === 'resizing' && message.width) label += ` · 生成 ${message.width}px`;
         updateProgress(visual, label);
@@ -533,11 +548,11 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
     xhr.timeout = 30 * 60 * 1000;
     xhr.upload.addEventListener('progress', (progressEvent) => {
       if (!progressEvent.lengthComputable) return;
-      const uploadPercent = progressEvent.loaded / progressEvent.total * 35;
+      const uploadPercent = 15 + progressEvent.loaded / progressEvent.total * 25;
       const megabytes = (progressEvent.loaded / 1024 / 1024).toFixed(1);
       updateProgress(uploadPercent, `正在上传原图… ${megabytes} MB`);
     });
-    xhr.upload.addEventListener('load', () => updateProgress(35, '上传完成，等待服务器处理…'));
+    xhr.upload.addEventListener('load', () => updateProgress(40, '上传完成，等待服务器处理…'));
     xhr.addEventListener('progress', readStream);
     xhr.addEventListener('load', () => {
       readStream();

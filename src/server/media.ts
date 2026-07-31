@@ -12,6 +12,7 @@ import {
 import type { PhotoVariant } from './types';
 
 const MAX_UPLOAD = 100 * 1024 * 1024;
+const MAX_IMAGE_BINDING_INPUT = 20_000_000;
 const MAX_WEB_WIDTH = 4096;
 const WIDTHS = [640, 1280, 2048, MAX_WEB_WIDTH];
 
@@ -60,6 +61,7 @@ async function processImageUpload(
   onProgress?: (progress: UploadProgress) => void,
 ): Promise<ProcessedImage> {
   if (file.size === 0 || file.size > MAX_UPLOAD) throw new Error('INVALID_FILE_SIZE');
+  if (file.size > MAX_IMAGE_BINDING_INPUT) throw new Error('IMAGE_REQUIRES_COMPRESSION');
   const ext = extension(file);
   if (!ext || !file.type.startsWith('image/')) throw new Error('UNSUPPORTED_FILE_TYPE');
 
