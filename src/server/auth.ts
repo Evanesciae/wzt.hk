@@ -3,12 +3,13 @@ import type { AstroCookies } from 'astro';
 
 const COOKIE_NAME = 'wzt_admin_session';
 const SESSION_DAYS = 30;
-const PBKDF2_ITERATIONS = 210_000;
+const PBKDF2_ITERATIONS = 100_000;
 
 type Bindings = {
   DB: D1Database;
   ADMIN_USERNAME?: string;
   ADMIN_PASSWORD_HASH?: string;
+  DISABLE_ADMIN_AUTH?: string;
 };
 
 interface SessionRow {
@@ -28,6 +29,10 @@ export interface AdminSession {
 
 function bindings() {
   return env as unknown as Bindings;
+}
+
+export function adminAuthDisabled() {
+  return bindings().DISABLE_ADMIN_AUTH === 'true';
 }
 
 function encode(bytes: Uint8Array) {

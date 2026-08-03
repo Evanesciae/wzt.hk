@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { fallbackAirport } from './airports';
 import type {
   Airport,
+  CityPlaceType,
   CityPhoto,
   CityPlace,
   CitySlug,
@@ -411,15 +412,39 @@ function baseTrip(row: Row): TravelTrip {
     draft: Boolean(row.draft),
     featured: Boolean(row.featured),
     days: [],
+    previewPhotos: [],
   };
 }
 
 export async function listTrips(includeDrafts = false): Promise<TravelTrip[]> {
-  const rows = await all(
-    `SELECT * FROM trips ${includeDrafts ? '' : 'WHERE draft = 0'}
-     ORDER BY featured DESC, dates_tbd DESC, start_date DESC, updated_at DESC`,
-  );
-  return rows.map(baseTrip);
+  const [rows, previewRows] = await Promise.all([
+    all(
+      `SELECT * FROM trips ${includeDrafts ? '' : 'WHERE draft = 0'}
+       ORDER BY featured DESC, dates_tbd DESC, start_date DESC, updated_at DESC`,
+    ),
+    all(
+      `SELECT * FROM (
+         SELECT p.*, d.trip_id AS preview_trip_id,
+           ROW_NUMBER() OVER (
+             PARTITION BY d.trip_id
+             ORDER BY p.featured DESC, p.sort_order IS NULL, p.sort_order,
+               p.taken_at IS NULL, p.taken_at, p.created_at
+           ) AS preview_rank
+         FROM travel_photos p
+         JOIN travel_events e ON e.id = p.event_id
+         JOIN trip_days d ON d.id = e.day_id
+         JOIN trips t ON t.id = d.trip_id
+         ${includeDrafts ? '' : 'WHERE t.draft = 0'}
+       ) WHERE preview_rank <= 8
+       ORDER BY preview_trip_id, preview_rank`,
+    ),
+  ]);
+  const previewPhotos = previewRows.map((row) => ({ tripId: String(row.preview_trip_id), photo: rowToPhoto(row) }));
+  return rows.map((row) => {
+    const trip = baseTrip(row);
+    trip.previewPhotos = previewPhotos.filter(({ tripId }) => tripId === trip.id).map(({ photo }) => photo);
+    return trip;
+  });
 }
 
 export async function getTrip(tripId: string, includeDrafts = false): Promise<TravelTrip | undefined> {
@@ -725,7 +750,7 @@ function rowToCityPlace(row: Row, photos: CityPhoto[]): CityPlace {
     id: String(row.id),
     city: String(row.city) as CitySlug,
     name: String(row.name),
-    type: String(row.type),
+    type: String(row.type) as CityPlaceType,
     district: row.district ? String(row.district) : undefined,
     lat: Number(row.lat),
     lng: Number(row.lng),
@@ -771,7 +796,7 @@ export interface CityPlaceInput {
   id?: string;
   city: CitySlug;
   name: string;
-  type: string;
+  type: CityPlaceType;
   district?: string;
   lat: number;
   lng: number;

@@ -1,7 +1,8 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro';
-import { getSession } from '../../server/auth';
+import { adminAuthDisabled, getSession } from '../../server/auth';
 
+if (adminAuthDisabled()) return Astro.redirect('/admin');
 if (await getSession(Astro.cookies)) return Astro.redirect('/admin');
 const next = Astro.url.searchParams.get('next') || '/admin';
 ---

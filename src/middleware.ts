@@ -1,5 +1,5 @@
 import { defineMiddleware } from 'astro:middleware';
-import { getSession, validCsrf, validOrigin } from './server/auth';
+import { adminAuthDisabled, getSession, validCsrf, validOrigin } from './server/auth';
 
 export const onRequest = defineMiddleware(async (context, next) => {
   const path = context.url.pathname;
@@ -7,6 +7,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
   const isAdminApi = path.startsWith('/api/admin');
   const isLoginApi = path === '/api/admin/login';
   if (!isAdminPage && !isAdminApi) return next();
+  if (adminAuthDisabled()) return next();
 
   const session = await getSession(context.cookies);
   if (session) context.locals.adminSession = session;

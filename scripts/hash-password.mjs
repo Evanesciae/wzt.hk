@@ -12,7 +12,7 @@ if (!password || password.length < 12) {
   process.exit(1);
 }
 
-const iterations = 210_000;
+const iterations = 100_000;
 const encode = (bytes) => Buffer.from(bytes).toString('base64url');
 const salt = webcrypto.getRandomValues(new Uint8Array(16));
 const key = await webcrypto.subtle.importKey(

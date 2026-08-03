@@ -1,8 +1,8 @@
 import type { APIRoute } from 'astro';
 import { deleteCityPlace, listCityPlacePhotoIds, updateCityPlace } from '../../../../server/database';
 import { deleteCityPhotoFiles } from '../../../../server/media';
-import { citySlugs } from '../../../../data/cities';
-import type { CitySlug } from '../../../../server/types';
+import { cityPlaceTypeSet, citySlugs } from '../../../../data/cities';
+import type { CityPlaceType, CitySlug } from '../../../../server/types';
 
 export const PATCH: APIRoute = async ({ params, request }) => {
   const id = params.id;
@@ -10,9 +10,10 @@ export const PATCH: APIRoute = async ({ params, request }) => {
   let body: Record<string, any>;
   try { body = await request.json(); } catch { return Response.json({ error: 'BAD_REQUEST' }, { status: 400 }); }
   const city = String(body.city ?? '') as CitySlug;
+  const type = String(body.type ?? '').trim() as CityPlaceType;
   const lat = Number(body.lat);
   const lng = Number(body.lng);
-  if (!citySlugs.has(city) || !body.name?.trim() || !body.type?.trim()
+  if (!citySlugs.has(city) || !body.name?.trim() || !cityPlaceTypeSet.has(type)
     || !Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
     return Response.json({ error: 'INVALID_PLACE' }, { status: 422 });
   }
@@ -20,7 +21,7 @@ export const PATCH: APIRoute = async ({ params, request }) => {
     await updateCityPlace(id, {
       city,
       name: String(body.name).trim(),
-      type: String(body.type).trim(),
+      type,
       district: body.district?.trim() || undefined,
       lat,
       lng,

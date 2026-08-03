@@ -1,4 +1,4 @@
-import type { CitySlug } from '../server/types';
+import type { CityPlaceType, CitySlug } from '../server/types';
 
 export interface CityDefinition {
   slug: CitySlug;
@@ -26,6 +26,17 @@ export const cities: CityDefinition[] = [
 ];
 
 export const citySlugs = new Set<CitySlug>(cities.map((city) => city.slug));
+
+export const cityPlaceTypes = [
+  '山野自然',
+  '城市景观',
+  '建筑街区',
+  '文化艺术',
+  '餐饮',
+  '商店市集',
+] as const satisfies readonly CityPlaceType[];
+
+export const cityPlaceTypeSet = new Set<CityPlaceType>(cityPlaceTypes);
 
 export function cityName(slug: string) {
   return cities.find((city) => city.slug === slug)?.name ?? slug;

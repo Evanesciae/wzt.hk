@@ -7,6 +7,10 @@ interface Props {
 }
 
 const { entry } = Astro.props;
+const previewPhotos = entry.previewPhotos.map((photo) => {
+  const variants = [...photo.variants].sort((a, b) => a.width - b.width);
+  return { ...photo, thumb: variants[0] };
+});
 ---
 
 <article class="content-card travel-card filter-item" data-status={entry.status}>
@@ -20,6 +24,19 @@ const { entry } = Astro.props;
   <h2>{entry.title}</h2>
   <p class="destination">⌖ {entry.destination}</p>
   <p>{entry.summary}</p>
+  {previewPhotos.length > 0 && (
+    <div class="travel-card-photos" aria-label={`${entry.title}的照片预览`}>
+      {previewPhotos.map((photo) => photo.thumb && (
+        <img
+          src={`/media/${photo.thumb.path}`}
+          alt={photo.alt}
+          width={photo.thumb.width}
+          height={photo.thumb.height}
+          loading="lazy"
+        />
+      ))}
+    </div>
+  )}
   <div class="card-footer">
     <span>{entry.pendingItems.length > 0 ? `${entry.pendingItems.length} 项待确认` : '事项已确认'}</span>
     <span aria-hidden="true">→</span>

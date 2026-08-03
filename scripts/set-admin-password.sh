@@ -20,4 +20,5 @@ fi
 hash="$(printf "%s" "$password" | node ./scripts/hash-password.mjs --stdin)"
 unset password confirmation
 printf "%s" "$hash" | CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false ./node_modules/.bin/wrangler secret put ADMIN_PASSWORD_HASH
+CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false ./node_modules/.bin/wrangler d1 execute DB --remote --command="UPDATE users SET password_hash = '$hash' WHERE username = 'admin'; DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE username = 'admin');"
 unset hash

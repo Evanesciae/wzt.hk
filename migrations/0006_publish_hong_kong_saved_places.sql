@@ -1,0 +1,35 @@
+UPDATE city_places
+SET draft = 0, updated_at = CURRENT_TIMESTAMP
+WHERE city = 'hong-kong'
+  AND id IN (
+    'tsing-yi-peak',
+    'castle-peak',
+    'cheung-ngau-shan',
+    'ma-on-shan',
+    'wan-kuk-shan',
+    'lantau-peak',
+    'tai-mo-shan',
+    'kai-kung-leng',
+    'sunset-peak',
+    'mount-high-west-viewing-point',
+    'fei-ngo-shan-viewing-point',
+    'victoria-peak',
+    'hung-hom-bay-photo-point',
+    'chater-road-photo-point',
+    'choi-hung-estate',
+    'ping-shek-estate',
+    'yung-kee-roast-goose-tsim-sha-tsui',
+    'boston-restaurant',
+    'ying-kee-noodle',
+    'xiao-noodles',
+    'ming-hing-shanxi-noodles',
+    'jiu-fen-taiwan-food',
+    'sei-gor-cart-noodles',
+    'auntie-sweet-yiu-wa-street',
+    'kams-roast-goose',
+    'little-bear-biscuits',
+    'dreamstore',
+    'japan-pop',
+    'infree-records',
+    'mystery-ranch-hong-kong'
+  );

@@ -4,6 +4,7 @@ import type { APIRoute } from 'astro';
 type Bindings = {
   MEDIA: R2Bucket;
   IMAGES: ImagesBinding;
+  LOCAL_MEDIA_ORIGIN?: string;
 };
 
 function contentHeaders(object: R2ObjectBody, path: string) {
@@ -39,6 +40,14 @@ async function transformImage(bindings: Bindings, originalPath: string, width: n
   }
 }
 
+async function fetchLocalFallback(bindings: Bindings, path: string, url: URL) {
+  if (!bindings.LOCAL_MEDIA_ORIGIN) return null;
+  const fallback = new URL(`/media/${path}`, bindings.LOCAL_MEDIA_ORIGIN);
+  fallback.search = url.search;
+  const response = await fetch(fallback);
+  return response.ok ? response : null;
+}
+
 export const GET: APIRoute = async ({ params, request, url }) => {
   if (!params.path || params.path.includes('..')) return new Response('Not found', { status: 404 });
   const bindings = env as unknown as Bindings;
@@ -47,6 +56,7 @@ export const GET: APIRoute = async ({ params, request, url }) => {
 
   if (requestedWidth) {
     return await transformImage(bindings, params.path, requestedWidth)
+      ?? await fetchLocalFallback(bindings, params.path, url)
       ?? new Response('Not found', { status: 404 });
   }
 
@@ -57,6 +67,8 @@ export const GET: APIRoute = async ({ params, request, url }) => {
       const generated = await transformImage(bindings, `${legacyVariant[1]}.jpeg`, Number(legacyVariant[2]));
       if (generated) return generated;
     }
+    const fallback = await fetchLocalFallback(bindings, params.path, url);
+    if (fallback) return fallback;
     return new Response('Not found', { status: 404 });
   }
   if (request.headers.get('if-none-match') === object.httpEtag) return new Response(null, { status: 304 });

@@ -197,12 +197,12 @@ const coverFor = (place: CityPlace) => {
     function renderMarkers(duration = 500) {
       markers.splice(0).forEach((marker) => marker.remove());
       const currentPlaces = visiblePlaces();
-      currentPlaces.forEach((place, index) => {
+      currentPlaces.forEach((place) => {
         const element = document.createElement('button');
         element.type = 'button';
         element.className = 'city-map-marker';
-        element.textContent = String(index + 1);
         element.title = place.name;
+        element.setAttribute('aria-label', `查看${place.name}`);
         const marker = new maplibregl.Marker({ element })
           .setLngLat([place.lng, place.lat])
           .setPopup(new maplibregl.Popup({ offset: 18 }).setDOMContent(popupContent(place)))

@@ -6,6 +6,7 @@ dist/
 backups/
 航班/
 .env
+.env.local
 .env.production
 .dev.vars*
 .wrangler/

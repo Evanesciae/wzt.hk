@@ -29,6 +29,7 @@ npm run cf:dev
 ```
 
 将生成结果填入 `.dev.vars` 的 `ADMIN_PASSWORD_HASH`。管理端位于 `/admin`。
+本地预览会优先读取本地 R2；缺少的图片会从线上站点读取，因此不需要复制整份图片库。
 
 提交或部署前运行：
 

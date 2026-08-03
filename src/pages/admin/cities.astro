@@ -1,7 +1,7 @@
 ---
 import 'maplibre-gl/dist/maplibre-gl.css';
 import BaseLayout from '../../layouts/BaseLayout.astro';
-import { cities, cityName } from '../../data/cities';
+import { cities, cityName, cityPlaceTypes } from '../../data/cities';
 import { listCityPlaces } from '../../server/database';
 
 const places = await listCityPlaces(true);
@@ -87,7 +87,7 @@ const places = await listCityPlaces(true);
         <label class="full" data-place-id-field>网址标识<input name="id" required maxlength="80" /></label>
         <label>城市<select name="city">{cities.map((city) => <option value={city.slug}>{city.name}</option>)}</select></label>
         <label>名称<input name="name" required maxlength="120" /></label>
-        <label>类型<input name="type" required maxlength="60" /></label>
+        <label>类型<select name="type" required>{cityPlaceTypes.map((type) => <option value={type}>{type}</option>)}</select></label>
         <label>所属区域<input name="district" maxlength="80" /></label>
         <label>纬度<input name="lat" type="number" step="any" required /></label>
         <label>经度<input name="lng" type="number" step="any" required /></label>

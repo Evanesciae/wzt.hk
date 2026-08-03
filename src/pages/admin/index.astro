@@ -7,14 +7,62 @@ const trips = await listTrips(true);
 
 <BaseLayout title="管理中心">
   <div class="container page-shell admin-dashboard">
-    <div class="admin-heading"><div><p class="eyebrow">ADMIN</p><h1>管理中心</h1></div><div class="admin-heading-actions"><button type="button" class="text-button" data-new-trip>新建行程</button><a class="text-button" href="/admin/flights">飞行日记</a><a class="text-button" href="/admin/airports">机场</a><a class="text-button" href="/admin/travel/generate">AI 生成行程</a><button type="button" class="text-button" data-logout>退出登录</button></div></div>
-    <section><h2>旅行</h2><div class="admin-trip-list">{trips.map((trip) => (
-      <div class="admin-trip-row">
-        <a href={`/admin/travel/${trip.id}`}><div><strong>{trip.title}</strong><span>{trip.destination}</span></div><span>编辑 →</span></a>
-        <button type="button" class="text-button admin-trip-delete" data-delete-trip={trip.id} data-trip-title={trip.title}>删除</button>
+    <header class="admin-heading">
+      <div>
+        <p class="eyebrow">ADMIN</p>
+        <h1>管理中心</h1>
+        <p class="admin-heading-description">集中管理网站内容、旅行记录和地点资料。</p>
       </div>
-    ))}</div></section>
-    <section><div class="admin-heading-actions" style="margin-bottom:20px"><a class="text-button" href="/admin/kb">知识库管理 →</a><a class="text-button" href="/admin/cities">城市地点 →</a><a class="text-button" href="/admin/flights">飞行日记 →</a><a class="text-button" href="/admin/airports">机场管理 →</a></div></section>
+      <div class="admin-heading-actions">
+        <button type="button" class="primary-button admin-primary-action" data-new-trip>新建行程</button>
+        <button type="button" class="text-button" data-logout>退出登录</button>
+      </div>
+    </header>
+
+    <nav class="admin-module-grid" aria-label="管理功能">
+      <a class="admin-module-card" href="/admin/kb">
+        <span class="admin-module-icon" aria-hidden="true">文</span>
+        <span><strong>知识库</strong><small>撰写与整理知识笔记</small></span>
+        <span class="admin-module-arrow" aria-hidden="true">→</span>
+      </a>
+      <a class="admin-module-card" href="/admin/cities">
+        <span class="admin-module-icon" aria-hidden="true">城</span>
+        <span><strong>城市地点</strong><small>维护地点、坐标与照片</small></span>
+        <span class="admin-module-arrow" aria-hidden="true">→</span>
+      </a>
+      <a class="admin-module-card" href="/admin/flights">
+        <span class="admin-module-icon" aria-hidden="true">飞</span>
+        <span><strong>飞行日记</strong><small>录入航班和飞行信息</small></span>
+        <span class="admin-module-arrow" aria-hidden="true">→</span>
+      </a>
+      <a class="admin-module-card" href="/admin/airports">
+        <span class="admin-module-icon" aria-hidden="true">港</span>
+        <span><strong>机场资料</strong><small>管理机场代码与位置</small></span>
+        <span class="admin-module-arrow" aria-hidden="true">→</span>
+      </a>
+    </nav>
+
+    <section class="admin-content-section">
+      <div class="admin-section-heading">
+        <div>
+          <p class="eyebrow">TRAVEL</p>
+          <h2>旅行行程</h2>
+        </div>
+        <a class="text-button" href="/admin/travel/generate">AI 生成行程 →</a>
+      </div>
+      <div class="admin-trip-list">
+        {trips.map((trip) => (
+          <div class="admin-trip-row">
+            <a href={`/admin/travel/${trip.id}`}>
+              <div><strong>{trip.title}</strong><span>{trip.destination}</span></div>
+              <span>编辑 →</span>
+            </a>
+            <button type="button" class="text-button admin-trip-delete" data-delete-trip={trip.id} data-trip-title={trip.title}>删除</button>
+          </div>
+        ))}
+      </div>
+      {trips.length === 0 && <p class="admin-empty-state">还没有行程。点击右上角“新建行程”开始记录。</p>}
+    </section>
   </div>
 
   <dialog class="event-editor-dialog" data-trip-dialog>

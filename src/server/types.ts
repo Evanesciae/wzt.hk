@@ -56,6 +56,7 @@ export interface KbNote {
 export interface PhotoVariant { width: number; height: number; path: string; size: number }
 
 export type CitySlug = 'hong-kong' | 'singapore';
+export type CityPlaceType = '山野自然' | '城市景观' | '建筑街区' | '文化艺术' | '餐饮' | '商店市集';
 
 export interface CityPhoto {
   id: string;
@@ -73,7 +74,7 @@ export interface CityPlace {
   id: string;
   city: CitySlug;
   name: string;
-  type: string;
+  type: CityPlaceType;
   district?: string;
   lat: number;
   lng: number;
@@ -152,4 +153,5 @@ export interface TravelTrip {
   draft: boolean;
   featured: boolean;
   days: TravelDay[];
+  previewPhotos: TravelPhoto[];
 }

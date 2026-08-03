@@ -11,7 +11,12 @@ export default defineConfig({
   build: {
     format: 'directory',
   },
+  server: {
+    host: '127.0.0.1',
+    port: 4321,
+  },
   vite: {
     build: { chunkSizeWarningLimit: 1100 },
+    server: { strictPort: true },
   },
 });

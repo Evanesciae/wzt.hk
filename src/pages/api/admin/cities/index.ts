@@ -1,17 +1,18 @@
 import type { APIRoute } from 'astro';
 import { createCityPlace } from '../../../../server/database';
-import { citySlugs } from '../../../../data/cities';
+import { cityPlaceTypeSet, citySlugs } from '../../../../data/cities';
 import { safeSlug } from '../../../../server/forms';
-import type { CitySlug } from '../../../../server/types';
+import type { CityPlaceType, CitySlug } from '../../../../server/types';
 
 export const POST: APIRoute = async ({ request }) => {
   let body: Record<string, any>;
   try { body = await request.json(); } catch { return Response.json({ error: 'BAD_REQUEST' }, { status: 400 }); }
   const id = safeSlug(body.id);
   const city = String(body.city ?? '') as CitySlug;
+  const type = String(body.type ?? '').trim() as CityPlaceType;
   const lat = Number(body.lat);
   const lng = Number(body.lng);
-  if (!id || !citySlugs.has(city) || !body.name?.trim() || !body.type?.trim()
+  if (!id || !citySlugs.has(city) || !body.name?.trim() || !cityPlaceTypeSet.has(type)
     || !Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
     return Response.json({ error: 'INVALID_PLACE' }, { status: 422 });
   }
@@ -20,7 +21,7 @@ export const POST: APIRoute = async ({ request }) => {
       id,
       city,
       name: String(body.name).trim(),
-      type: String(body.type).trim(),
+      type,
       district: body.district?.trim() || undefined,
       lat,
       lng,
