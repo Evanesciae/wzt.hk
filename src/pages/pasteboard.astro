@@ -2,7 +2,7 @@
 import BaseLayout from '../layouts/BaseLayout.astro';
 ---
 
-<BaseLayout title="粘贴板" description="粘贴板">
+<BaseLayout title="粘贴板" description="粘贴板" brandHref="https://wzt.hk">
   <div class="container pasteboard-shell">
     <header class="pasteboard-header">
       <h1>粘贴板</h1>
@@ -404,6 +404,11 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 
 
 <style>
+  :global(.site-nav),
+  :global(.site-footer) {
+    display: none;
+  }
+
   :root {
     --accent: #3f6e63;
     background: var(--bg);

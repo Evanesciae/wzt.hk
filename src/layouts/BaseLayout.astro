@@ -5,17 +5,17 @@ import site from '../data/site.json';
 interface Props {
   title?: string;
   description?: string;
+  brandHref?: string;
 }
 
-const { title, description = site.description } = Astro.props;
+const { title, description = site.description, brandHref = '/' } = Astro.props;
 const pageTitle = title ? `${title} · ${site.title}` : site.title;
 const canonicalURL = new URL(Astro.url.pathname, Astro.site);
 const navItems = [
   { href: '/', label: '首页' },
-  { href: '/kb/', label: '知识库' },
   { href: '/travel/', label: '旅行' },
+  { href: '/kb/', label: '知识库' },
   { href: '/cities/', label: '城市' },
-  { href: '/links/', label: '链接' },
 ];
 const currentPath = Astro.url.pathname;
 const adminSession = Astro.locals.adminSession;
@@ -29,6 +29,15 @@ const adminSession = Astro.locals.adminSession;
     <meta name="generator" content={Astro.generator} />
     <meta name="description" content={description} />
     <meta name="theme-color" content="#ffffff" />
+    <script is:inline>
+      (() => {
+        const saved = localStorage.getItem('site-theme');
+        const theme = saved === 'light' || saved === 'dark'
+          ? saved
+          : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.dataset.theme = theme;
+      })();
+    </script>
     {adminSession && <meta name="csrf-token" content={adminSession.csrfToken} />}
     <link rel="canonical" href={canonicalURL} />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -38,7 +47,7 @@ const adminSession = Astro.locals.adminSession;
   <body>
     <header class="site-header">
       <div class="container header-inner">
-        <a class="site-brand" href="/" aria-label="wzt.hk 首页">
+        <a class="site-brand" href={brandHref} aria-label="wzt.hk 首页">
           <span class="brand-mark" aria-hidden="true">W</span>
           <span>wzt.hk</span>
         </a>
@@ -53,6 +62,10 @@ const adminSession = Astro.locals.adminSession;
               </a>
             );
           })}
+          <a href="https://paste.wzt.hk">Paste</a>
+          <button class="theme-toggle" type="button" data-theme-toggle aria-label="切换为深色模式" title="切换显示模式">
+            <span aria-hidden="true" data-theme-icon>◐</span>
+          </button>
         </nav>
       </div>
     </header>
@@ -64,8 +77,26 @@ const adminSession = Astro.locals.adminSession;
     <footer class="site-footer">
       <div class="container footer-inner">
         <span>© {new Date().getFullYear()} {site.owner}</span>
-        <span>wzt.hk</span>
+        <nav aria-label="页尾导航"><a href="/links/">快速链接</a><a href="/admin/">管理</a></nav>
       </div>
     </footer>
+    <script>
+      const root = document.documentElement;
+      const toggle = document.querySelector<HTMLButtonElement>('[data-theme-toggle]');
+      const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+      function syncThemeControl() {
+        const dark = root.dataset.theme === 'dark';
+        if (toggle) toggle.setAttribute('aria-label', dark ? '切换为浅色模式' : '切换为深色模式');
+        if (meta) meta.content = dark ? '#191919' : '#ffffff';
+      }
+      syncThemeControl();
+      toggle?.addEventListener('click', () => {
+        const theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+        root.dataset.theme = theme;
+        localStorage.setItem('site-theme', theme);
+        syncThemeControl();
+        document.dispatchEvent(new CustomEvent('site-theme-change', { detail: theme }));
+      });
+    </script>
   </body>
 </html>
