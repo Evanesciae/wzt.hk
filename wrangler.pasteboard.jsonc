@@ -1,0 +1,41 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "wzt-hk-pasteboard",
+  "main": "@astrojs/cloudflare/entrypoints/server",
+  "compatibility_date": "2026-07-29",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "paste.wzt.hk",
+      "custom_domain": true
+    }
+  ],
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "./dist"
+  },
+  "cache": {
+    "enabled": false
+  },
+  "observability": {
+    "enabled": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "wzt-hk-pasteboard",
+      "database_id": "c33e543b-5705-48b1-8bfe-9b1491936f44",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "wzt-hk-pasteboard-files"
+    }
+  ],
+  "vars": {
+    "APP_TIME_ZONE": "Asia/Hong_Kong"
+  }
+}
