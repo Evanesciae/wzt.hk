@@ -18,7 +18,7 @@
     "cf:set-admin-password": "bash ./scripts/set-admin-password.sh",
     "cf:deploy": "CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false npm run build && CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false wrangler deploy",
     "paste:migrate": "wrangler d1 migrations apply DB --remote --config wrangler.pasteboard.jsonc",
-    "paste:deploy": "CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false npm run build && CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false wrangler deploy --config wrangler.pasteboard.jsonc",
+    "paste:deploy": "WZT_DEPLOY_TARGET=pasteboard CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false npm run build && CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false wrangler deploy",
     "admin:password": "node ./scripts/hash-password.mjs",
     "check": "ASTRO_TELEMETRY_DISABLED=1 astro check"
   },

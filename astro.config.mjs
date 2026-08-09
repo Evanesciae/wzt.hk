@@ -1,10 +1,13 @@
 import { defineConfig } from 'astro/config';
 import cloudflare from '@astrojs/cloudflare';
 
+const pasteboardDeployment = process.env.WZT_DEPLOY_TARGET === 'pasteboard';
+
 export default defineConfig({
-  site: 'https://wzt.hk',
+  site: pasteboardDeployment ? 'https://paste.wzt.hk' : 'https://wzt.hk',
   output: 'server',
   adapter: cloudflare({
+    configPath: pasteboardDeployment ? './wrangler.pasteboard.jsonc' : undefined,
     imageService: 'cloudflare-binding',
     sessionKVBindingName: 'SESSION',
   }),
