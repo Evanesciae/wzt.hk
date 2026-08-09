@@ -226,10 +226,10 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
     if (geoReady || !geoMapEl) return;
     geoReady = true;
     const { default: maplibregl } = await import('maplibre-gl');
-    const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const dark = document.documentElement.dataset.theme === 'dark';
     const center = JSON.parse(geoMapEl.dataset.geoDefault || '[114.17,22.32]');
     geoMap = new maplibregl.Map({
-      container: geoMapEl, style: `https://tiles.openfreemap.org/styles/${dark ? 'dark' : 'positron'}`,
+      container: geoMapEl, style: `https://tiles.openfreemap.org/styles/${dark ? 'liberty' : 'positron'}`,
       center, zoom: 11, cooperativeGestures: true,
     });
     geoMap.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');

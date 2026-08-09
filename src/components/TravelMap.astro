@@ -32,6 +32,7 @@ const firstMappableDay = days.find((day) => day.points.length > 0) ?? days[0];
     <div class="map-frame">
       <div class="map-canvas" data-map-canvas aria-label="每日地点地图"></div>
       <div class="map-empty" data-map-empty hidden>这一天还没有地点坐标。</div>
+      <div class="map-load-status" data-map-load-status hidden>地图暂时无法加载，行程列表仍可正常浏览。</div>
     </div>
     <p class="map-caption">点位依照时间线顺序连接，不代表实际导航路线。</p>
   </div>
@@ -65,6 +66,7 @@ const firstMappableDay = days.find((day) => day.points.length > 0) ?? days[0];
       <div class="map-frame">
         <div class="map-canvas" data-map-dialog-canvas aria-label="展开的每日地点地图"></div>
         <div class="map-empty" data-map-dialog-empty hidden>这一天还没有地点坐标。</div>
+        <div class="map-load-status" data-map-load-status hidden>地图暂时无法加载，行程列表仍可正常浏览。</div>
       </div>
       <p class="map-caption">点位依照时间线顺序连接，不代表实际导航路线。</p>
     </div>
@@ -83,6 +85,7 @@ const firstMappableDay = days.find((day) => day.points.length > 0) ?? days[0];
     markers: Marker[];
     activeDayId: string;
     loaded: boolean;
+    loadStatus?: HTMLElement;
   }
 
   document.querySelectorAll<HTMLElement>('[data-trip-map]').forEach(async (root) => {
@@ -108,7 +111,7 @@ const firstMappableDay = days.find((day) => day.points.length > 0) ?? days[0];
 
     const { default: maplibregl } = await import('maplibre-gl');
     const initialDay = days.find((day) => day.points.length > 0) ?? days[0];
-    const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const dark = document.documentElement.dataset.theme === 'dark';
     let currentDayId = initialDay.id;
     let dialogState: MapState | undefined;
 
@@ -161,9 +164,10 @@ const firstMappableDay = days.find((day) => day.points.length > 0) ?? days[0];
     }
 
     function createMapState(mapCanvas: HTMLElement, mapEmpty: HTMLElement | undefined, cooperativeGestures: boolean) {
+      const loadStatus = mapCanvas.parentElement?.querySelector<HTMLElement>('[data-map-load-status]') ?? undefined;
       const map = new maplibregl.Map({
         container: mapCanvas,
-        style: `https://tiles.openfreemap.org/styles/${dark ? 'dark' : 'positron'}`,
+        style: `https://tiles.openfreemap.org/styles/${dark ? 'liberty' : 'positron'}`,
         center: initialDay.points[0] ? [initialDay.points[0].lng, initialDay.points[0].lat] : [121, 24],
         zoom: 10,
         cooperativeGestures,
@@ -176,6 +180,7 @@ const firstMappableDay = days.find((day) => day.points.length > 0) ?? days[0];
         markers: [],
         activeDayId: '',
         loaded: false,
+        loadStatus,
       };
       map.on('load', () => {
         map.addSource('day-route', { type: 'geojson', data: lineData([]) });
@@ -187,9 +192,12 @@ const firstMappableDay = days.find((day) => day.points.length > 0) ?? days[0];
           paint: { 'line-color': dark ? '#b8c6c1' : '#4f625d', 'line-width': 2, 'line-opacity': .72, 'line-dasharray': [2, 2] },
         });
         state.loaded = true;
+        if (state.loadStatus) state.loadStatus.hidden = true;
         state.activeDayId = '';
         renderDay(state, currentDayId, 0);
       });
+      map.on('error', () => { if (!state.loaded && state.loadStatus) state.loadStatus.hidden = false; });
+      setTimeout(() => { if (!state.loaded && state.loadStatus) state.loadStatus.hidden = false; }, 7000);
       return state;
     }
 
@@ -207,6 +215,13 @@ const firstMappableDay = days.find((day) => day.points.length > 0) ?? days[0];
       if (dialogCity) dialogCity.textContent = day.city;
       renderDay(inlineState, day.id);
       if (dialogState) renderDay(dialogState, day.id);
+    }
+
+    function focusPoint(state: MapState, point: { lat: number; lng: number; title?: string }) {
+      if (!state.loaded) return;
+      state.map.resize();
+      state.map.easeTo({ center: [point.lng, point.lat], zoom: Math.max(state.map.getZoom(), 14), duration: 550 });
+      if (point.title) new maplibregl.Popup({ offset: 16 }).setLngLat([point.lng, point.lat]).setText(point.title).addTo(state.map);
     }
 
     const timeline = root.closest<HTMLElement>('.trip-timeline-section');
@@ -234,10 +249,10 @@ const firstMappableDay = days.find((day) => day.points.length > 0) ?? days[0];
     mobileMap.addEventListener('change', scheduleDockUpdate);
     updateDock();
 
-    dock?.addEventListener('click', () => {
+    const openDialog = () => {
       if (!dialog || !dialogCanvas) return;
       dialog.showModal();
-      dock.setAttribute('aria-expanded', 'true');
+      dock?.setAttribute('aria-expanded', 'true');
       if (!dialogState) dialogState = createMapState(dialogCanvas, dialogEmpty ?? undefined, false);
       requestAnimationFrame(() => {
         if (!dialogState) return;
@@ -246,7 +261,15 @@ const firstMappableDay = days.find((day) => day.points.length > 0) ?? days[0];
         renderDay(dialogState, currentDayId, 0);
       });
       setTimeout(() => dialogState?.map.resize(), 260);
-    });
+    };
+    dock?.addEventListener('click', openDialog);
+    document.addEventListener('travel-map-open', openDialog);
+    document.addEventListener('travel-map-focus', ((event: CustomEvent<{ dayId: string; lat: number; lng: number; title?: string }>) => {
+      showDay(event.detail.dayId);
+      focusPoint(inlineState, event.detail);
+      if (dialogState) focusPoint(dialogState, event.detail);
+      if (mobileMap.matches) openDialog();
+    }) as EventListener);
 
     dialogClose?.addEventListener('click', () => dialog?.close());
     dialog?.addEventListener('click', (event) => {

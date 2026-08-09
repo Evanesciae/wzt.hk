@@ -2,9 +2,10 @@
 import 'maplibre-gl/dist/maplibre-gl.css';
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import { cities, cityName, cityPlaceTypes } from '../../data/cities';
-import { listCityPlaces } from '../../server/database';
+import { listCityPlaces, listTrips } from '../../server/database';
 
-const places = await listCityPlaces(true);
+const [places, trips] = await Promise.all([listCityPlaces(true), listTrips(true)]);
+const visitStatusLabel = { want: '想去', visited: '去过' } as const;
 ---
 
 <BaseLayout title="城市地点管理">
@@ -32,17 +33,27 @@ const places = await listCityPlaces(true);
             lat: place.lat,
             lng: place.lng,
             note: place.note,
+            visitStatus: place.visitStatus,
+            favorite: place.favorite,
+            recommendation: place.recommendation,
+            address: place.address,
+            tags: place.tags,
+            rating: place.rating,
+            lastVisitedAt: place.lastVisitedAt,
+            tripId: place.relatedTrip?.id,
             draft: place.draft,
           })}
           data-photo-dropzone
         >
           <div class="admin-event-order">{String(index + 1).padStart(2, '0')}</div>
           <div class="admin-event-content">
-            <span class="admin-event-type">{cityName(place.city)} · {place.type}{place.draft ? ' · 草稿' : ''}</span>
+            <span class="admin-event-type">{cityName(place.city)} · {place.type} · {visitStatusLabel[place.visitStatus]}{place.favorite ? ' · 收藏' : ''}{place.draft ? ' · 草稿' : ''}</span>
             <h3>{place.name}</h3>
             <div class="admin-event-meta">
               {place.district && <span>{place.district}</span>}
               <span>{place.photos.length} 张照片</span>
+              {place.rating && <span>{place.rating}/5</span>}
+              {place.relatedTrip && <span>关联：{place.relatedTrip.title}</span>}
               <span>{place.lat.toFixed(4)}, {place.lng.toFixed(4)}</span>
             </div>
             {place.photos.length > 0 && (
@@ -89,6 +100,13 @@ const places = await listCityPlaces(true);
         <label>名称<input name="name" required maxlength="120" /></label>
         <label>类型<select name="type" required>{cityPlaceTypes.map((type) => <option value={type}>{type}</option>)}</select></label>
         <label>所属区域<input name="district" maxlength="80" /></label>
+        <label>状态<select name="visitStatus"><option value="want">想去</option><option value="visited">去过</option></select></label>
+        <label>评分<input name="rating" type="number" min="1" max="5" step="0.5" placeholder="1–5" /></label>
+        <label>最后到访<input name="lastVisitedAt" type="date" /></label>
+        <label>关联旅行<select name="tripId"><option value="">不关联</option>{trips.map((trip) => <option value={trip.id}>{trip.title}</option>)}</select></label>
+        <label class="full">地址<input name="address" maxlength="240" /></label>
+        <label class="full">推荐理由<input name="recommendation" maxlength="280" placeholder="为什么值得去？" /></label>
+        <label class="full">标签<input name="tags" maxlength="240" placeholder="摄影, 日落, 徒步" /></label>
         <label>纬度<input name="lat" type="number" step="any" required /></label>
         <label>经度<input name="lng" type="number" step="any" required /></label>
         <div class="full geo-picker">
@@ -97,7 +115,7 @@ const places = await listCityPlaces(true);
           <div class="geo-map" data-geo-map data-city-centers={JSON.stringify(Object.fromEntries(cities.map((city) => [city.slug, city.center])))}></div>
         </div>
         <label class="full">文字（可选）<textarea name="note" rows="5"></textarea></label>
-        <label class="full form-checks"><label><input name="draft" type="checkbox" /><span>草稿</span></label></label>
+        <label class="full form-checks"><label><input name="favorite" type="checkbox" /><span>收藏</span></label><label><input name="draft" type="checkbox" /><span>草稿</span></label></label>
       </div>
       <p class="form-error" data-place-error hidden></p>
       <footer><button type="button" class="text-button" data-dialog-close>取消</button><button type="submit" class="primary-button">保存</button></footer>
@@ -129,11 +147,11 @@ const places = await listCityPlaces(true);
     if (!geoMapElement) return;
     if (!geoMap) {
       const { default: maplibregl } = await import('maplibre-gl');
-      const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const dark = document.documentElement.dataset.theme === 'dark';
       const center = cityCenters[form.elements.city.value] ?? [114.17, 22.32];
       geoMap = new maplibregl.Map({
         container: geoMapElement,
-        style: `https://tiles.openfreemap.org/styles/${dark ? 'dark' : 'positron'}`,
+        style: `https://tiles.openfreemap.org/styles/${dark ? 'liberty' : 'positron'}`,
         center,
         zoom: 10,
       });
@@ -220,7 +238,9 @@ const places = await listCityPlaces(true);
     form.elements.id.value = place.id;
     idField.hidden = true;
     form.elements.id.required = false;
-    for (const key of ['city', 'name', 'type', 'district', 'lat', 'lng', 'note']) form.elements[key].value = place[key] ?? '';
+    for (const key of ['city', 'name', 'type', 'district', 'lat', 'lng', 'note', 'visitStatus', 'rating', 'lastVisitedAt', 'address', 'recommendation', 'tripId']) form.elements[key].value = place[key] ?? '';
+    form.elements.tags.value = (place.tags ?? []).join(', ');
+    form.elements.favorite.checked = Boolean(place.favorite);
     form.elements.draft.checked = Boolean(place.draft);
     dialogTitle.textContent = '编辑地点';
     error.hidden = true;
@@ -242,6 +262,14 @@ const places = await listCityPlaces(true);
       lat: data.get('lat'),
       lng: data.get('lng'),
       note: data.get('note'),
+      visitStatus: data.get('visitStatus'),
+      favorite: form.elements.favorite.checked,
+      recommendation: data.get('recommendation'),
+      address: data.get('address'),
+      tags: String(data.get('tags') ?? '').split(/[,，]/).map((tag) => tag.trim()).filter(Boolean),
+      rating: data.get('rating'),
+      lastVisitedAt: data.get('lastVisitedAt'),
+      tripId: data.get('tripId'),
       draft: form.elements.draft.checked,
     };
     const response = await api(currentId ? `/api/admin/cities/${currentId}` : '/api/admin/cities', {

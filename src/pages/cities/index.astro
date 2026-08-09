@@ -10,7 +10,7 @@ const places = await listCityPlaces();
 
 <BaseLayout title="城市探索">
   <div class="container page-shell city-page">
-    <PageHeader eyebrow="CITY EXPLORATION" title="城市探索" count={places.length} />
+    <PageHeader eyebrow="CITY EXPLORATION" title="城市探索" description="收藏想去与去过的地点，在地图和旅程之间建立联系。" count={places.length} />
     <CityExplorer cities={cities} places={places} />
   </div>
 </BaseLayout>

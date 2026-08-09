@@ -2,7 +2,7 @@ import type { APIRoute } from 'astro';
 import { deleteCityPlace, listCityPlacePhotoIds, updateCityPlace } from '../../../../server/database';
 import { deleteCityPhotoFiles } from '../../../../server/media';
 import { cityPlaceTypeSet, citySlugs } from '../../../../data/cities';
-import type { CityPlaceType, CitySlug } from '../../../../server/types';
+import type { CityPlaceType, CitySlug, CityVisitStatus } from '../../../../server/types';
 
 export const PATCH: APIRoute = async ({ params, request }) => {
   const id = params.id;
@@ -13,8 +13,12 @@ export const PATCH: APIRoute = async ({ params, request }) => {
   const type = String(body.type ?? '').trim() as CityPlaceType;
   const lat = Number(body.lat);
   const lng = Number(body.lng);
+  const visitStatus = String(body.visitStatus ?? 'want') as CityVisitStatus;
+  const rating = body.rating === '' || body.rating == null ? undefined : Number(body.rating);
   if (!citySlugs.has(city) || !body.name?.trim() || !cityPlaceTypeSet.has(type)
-    || !Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    || !['want', 'visited'].includes(visitStatus)
+    || !Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180
+    || (rating !== undefined && (!Number.isFinite(rating) || rating < 1 || rating > 5))) {
     return Response.json({ error: 'INVALID_PLACE' }, { status: 422 });
   }
   try {
@@ -26,6 +30,14 @@ export const PATCH: APIRoute = async ({ params, request }) => {
       lat,
       lng,
       note: body.note?.trim() || undefined,
+      visitStatus,
+      favorite: Boolean(body.favorite),
+      recommendation: body.recommendation?.trim() || undefined,
+      address: body.address?.trim() || undefined,
+      tags: Array.isArray(body.tags) ? body.tags.map((tag: unknown) => String(tag).trim()).filter(Boolean).slice(0, 20) : [],
+      rating,
+      lastVisitedAt: body.lastVisitedAt || undefined,
+      tripId: body.tripId || undefined,
       draft: Boolean(body.draft),
     });
     return Response.json({ ok: true });

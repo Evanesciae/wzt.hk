@@ -7,6 +7,7 @@ const { name, lat, lng } = Astro.props;
 
 <div class="city-detail-map" data-city-detail-map data-name={name} data-lat={lat} data-lng={lng}>
   <div data-map-canvas aria-label={`${name}地图位置`}></div>
+  <p class="map-load-status" data-map-status hidden>地图暂时无法加载，请使用下方导航链接。</p>
 </div>
 
 <script>
@@ -18,10 +19,13 @@ const { name, lat, lng } = Astro.props;
     const lng = Number(root.dataset.lng);
     if (!canvas || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
     const { default: maplibregl } = await import('maplibre-gl');
-    const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const styleForTheme = (theme = document.documentElement.dataset.theme) =>
+      `https://tiles.openfreemap.org/styles/${theme === 'dark' ? 'liberty' : 'positron'}`;
+    const status = root.querySelector<HTMLElement>('[data-map-status]');
+    let loaded = false;
     const map = new maplibregl.Map({
       container: canvas,
-      style: `https://tiles.openfreemap.org/styles/${dark ? 'dark' : 'positron'}`,
+      style: styleForTheme(),
       center: [lng, lat],
       zoom: 13.5,
       cooperativeGestures: true,
@@ -30,5 +34,9 @@ const { name, lat, lng } = Astro.props;
     const marker = document.createElement('span');
     marker.className = 'city-map-marker city-detail-marker';
     new maplibregl.Marker({ element: marker }).setLngLat([lng, lat]).addTo(map);
+    map.on('load', () => { loaded = true; if (status) status.hidden = true; });
+    map.on('error', () => { if (!loaded && status) status.hidden = false; });
+    setTimeout(() => { if (!loaded && status) status.hidden = false; }, 7000);
+    document.addEventListener('site-theme-change', (event) => { map.setStyle(styleForTheme((event as CustomEvent<string>).detail)); });
   });
 </script>

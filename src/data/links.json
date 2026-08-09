@@ -1,53 +1,32 @@
 [
   {
-    "id": "chatgpt",
-    "title": "ChatGPT",
-    "url": "https://chatgpt.com",
-    "description": "日常对话、研究与创作辅助。",
-    "category": "AI",
+    "id": "wzt-hk",
+    "title": "wzt.hk",
+    "url": "https://wzt.hk",
+    "description": "我的个人网站。",
+    "category": "Tools",
     "private": false,
     "pinned": true,
     "order": 1
   },
   {
-    "id": "github",
-    "title": "GitHub",
-    "url": "https://github.com",
-    "description": "代码仓库与开发协作。",
-    "category": "Dev",
+    "id": "wztmail-com",
+    "title": "wztmail.com",
+    "url": "https://wztmail.com",
+    "description": "我的邮件服务。",
+    "category": "Tools",
     "private": false,
     "pinned": true,
     "order": 2
   },
   {
-    "id": "mdn",
-    "title": "MDN Web Docs",
-    "url": "https://developer.mozilla.org",
-    "description": "Web 平台技术参考。",
-    "category": "Study",
-    "private": false,
-    "pinned": false,
-    "order": 3
-  },
-  {
-    "id": "google-maps",
-    "title": "Google Maps",
-    "url": "https://maps.google.com",
-    "description": "目的地收藏与路线规划。",
-    "category": "Travel",
+    "id": "360-wzt-hk",
+    "title": "360.wzt.hk",
+    "url": "https://360.wzt.hk",
+    "description": "我的 360 网站。",
+    "category": "Tools",
     "private": false,
     "pinned": true,
-    "order": 4
-  },
-  {
-    "id": "local-dashboard",
-    "title": "本地工作台（示例）",
-    "url": "http://localhost:3000",
-    "description": "仅在本机运行的服务入口示例。",
-    "category": "Tools",
-    "private": true,
-    "pinned": false,
-    "order": 5
+    "order": 3
   }
 ]
-

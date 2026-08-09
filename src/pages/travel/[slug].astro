@@ -76,13 +76,23 @@ const photoDays = days.map((day, dayIndex) => ({
       {photos.length > 0 && <a href="#trip-album">行程相册 <span>{photos.length}</span></a>}
     </nav>
 
+    <nav class="trip-day-jump" aria-label="快速跳转到日期">
+      {days.map((day, dayIndex) => <a href={`#day-${day.id}`} data-day-jump={day.id}><strong>{String(dayIndex + 1).padStart(2, '0')}</strong><span>{dayLabel(day, dayIndex)}</span></a>)}
+    </nav>
+
+    <div class="trip-mobile-tabs" aria-label="手机端行程视图">
+      <button type="button" data-mobile-target="timeline">行程</button>
+      <button type="button" data-mobile-map-open>地图</button>
+      {photos.length > 0 && <button type="button" data-mobile-target="trip-album">相册</button>}
+    </div>
+
     {entry.pendingItems.length > 0 && <aside class="pending-panel"><h2>出发前待确认</h2><ul>{entry.pendingItems.map((item) => <li>{item}</li>)}</ul></aside>}
 
     <section class="trip-timeline-section" id="timeline">
       <div class="timeline-column">
         <div class="section-heading trip-section-heading"><div><p class="eyebrow">ITINERARY</p><h2>每日行程</h2></div></div>
         {days.map((day, dayIndex) => (
-          <section class="travel-day" data-travel-day={day.id}>
+          <section class="travel-day" id={`day-${day.id}`} data-travel-day={day.id}>
             <header class="day-header">
               <div class="day-number">{String(dayIndex + 1).padStart(2, '0')}</div>
               <div>
@@ -91,11 +101,18 @@ const photoDays = days.map((day, dayIndex) => ({
                   : <time datetime={day.date}>{formatDate(date(day.date), { month: 'long', day: 'numeric', weekday: 'long' })}</time>}
                 <h2>{day.title ?? day.city}</h2>{day.title && <p>{day.city}</p>}
               </div>
-              {day.events.some((event) => event.photos.length > 0) && (
-                <a class="day-photo-link" href={`#album-${day.id}`}>本日 {day.events.reduce((total, event) => total + event.photos.length, 0)} 张照片 ↓</a>
-              )}
+              <div class="day-actions">
+                {day.events.some((event) => event.photos.length > 0) && (
+                  <a class="day-photo-link" href={`#album-${day.id}`}>本日 {day.events.reduce((total, event) => total + event.photos.length, 0)} 张照片 ↓</a>
+                )}
+                <button type="button" class="day-toggle" data-day-toggle aria-expanded="true" aria-controls={`day-panel-${day.id}`}>
+                  <span data-day-toggle-label>收起</span><span aria-hidden="true">⌄</span>
+                </button>
+              </div>
             </header>
-            <div class="day-events">{day.events.map((event, index) => <TravelEvent event={event} order={index + 1} />)}</div>
+            <div class="day-collapsible" id={`day-panel-${day.id}`} data-day-panel>
+              <div class="day-events">{day.events.map((event, index) => <TravelEvent event={event} order={index + 1} />)}</div>
+            </div>
           </section>
         ))}
       </div>
@@ -126,6 +143,24 @@ const photoDays = days.map((day, dayIndex) => ({
 
 <script>
   const sections = [...document.querySelectorAll<HTMLElement>('[data-travel-day]')];
+  document.querySelectorAll<HTMLButtonElement>('[data-day-toggle]').forEach((button) => button.addEventListener('click', () => {
+    const panel = document.getElementById(button.getAttribute('aria-controls') ?? '');
+    if (!panel) return;
+    const expanded = button.getAttribute('aria-expanded') === 'true';
+    button.setAttribute('aria-expanded', String(!expanded));
+    panel.hidden = expanded;
+    const label = button.querySelector<HTMLElement>('[data-day-toggle-label]');
+    if (label) label.textContent = expanded ? '展开' : '收起';
+  }));
+  document.querySelectorAll<HTMLAnchorElement>('[data-day-jump]').forEach((link) => link.addEventListener('click', () => {
+    const id = link.dataset.dayJump;
+    const section = sections.find((item) => item.dataset.travelDay === id);
+    const button = section?.querySelector<HTMLButtonElement>('[data-day-toggle]');
+    const panel = section?.querySelector<HTMLElement>('[data-day-panel]');
+    if (button && panel) { button.setAttribute('aria-expanded', 'true'); panel.hidden = false; const label = button.querySelector<HTMLElement>('[data-day-toggle-label]'); if (label) label.textContent = '收起'; }
+  }));
+  document.querySelectorAll<HTMLButtonElement>('[data-mobile-target]').forEach((button) => button.addEventListener('click', () => document.getElementById(button.dataset.mobileTarget ?? '')?.scrollIntoView({ behavior: 'smooth' })));
+  document.querySelector<HTMLButtonElement>('[data-mobile-map-open]')?.addEventListener('click', () => document.dispatchEvent(new CustomEvent('travel-map-open')));
   if (sections.length > 0) {
     let active = '';
     let ticking = false;

@@ -32,7 +32,7 @@ const photoItems = preparedPhotos.map((photo) => ({
 }));
 ---
 
-<article class:list={['timeline-event', `event-${event.type}`]} id={`event-${event.id}`}>
+<article class:list={['timeline-event', `event-${event.type}`, event.location && 'event-has-map']} id={`event-${event.id}`}>
   <div class="event-marker" aria-hidden="true">
     <span>{order}</span>
   </div>
@@ -61,6 +61,7 @@ const photoItems = preparedPhotos.map((photo) => ({
       <p class="dish-list">{event.data.dishes?.join(' · ')}</p>
     )}
     {event.location?.address && <p class="event-address">{event.location.address}</p>}
+    {event.location && <button class="event-map-link" type="button" data-event-map data-day-id={event.dayId} data-lat={event.location.lat} data-lng={event.location.lng} data-title={event.title}>地图定位 ↗</button>}
     {event.note && <p class="event-note">{event.note}</p>}
     {event.type === 'stay' && event.data.booking && (
       <a class="text-link" href={event.data.booking} target="_blank" rel="noreferrer">查看预订 ↗</a>
@@ -101,4 +102,10 @@ const photoItems = preparedPhotos.map((photo) => ({
 <script>
   import { setupPhotoLightboxes } from '../lib/photo-lightbox';
   setupPhotoLightboxes();
+  document.querySelectorAll<HTMLButtonElement>('[data-event-map]:not([data-ready])').forEach((button) => {
+    button.dataset.ready = 'true';
+    button.addEventListener('click', () => document.dispatchEvent(new CustomEvent('travel-map-focus', { detail: {
+      dayId: button.dataset.dayId, lat: Number(button.dataset.lat), lng: Number(button.dataset.lng), title: button.dataset.title,
+    } })));
+  });
 </script>

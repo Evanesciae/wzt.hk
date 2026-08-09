@@ -4,7 +4,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 import PageHeader from '../components/PageHeader.astro';
 
 const links = (await getCollection('links')).sort((a, b) => a.data.order - b.data.order);
-const categories = ['AI', 'Dev', 'Study', 'Travel', 'Storage', 'Finance', 'Tools'];
+const categories = [...new Set(links.map((link) => link.data.category))];
 ---
 
 <BaseLayout title="常用链接" description="常用工具、资料与服务入口。">

@@ -6,6 +6,7 @@ import type {
   CityPhoto,
   CityPlace,
   CitySlug,
+  CityVisitStatus,
   EventType,
   Flight,
   KbNote,
@@ -755,6 +756,14 @@ function rowToCityPlace(row: Row, photos: CityPhoto[]): CityPlace {
     lat: Number(row.lat),
     lng: Number(row.lng),
     note: row.note ? String(row.note) : undefined,
+    visitStatus: row.visit_status === 'visited' ? 'visited' : 'want',
+    favorite: Boolean(row.favorite),
+    recommendation: row.recommendation ? String(row.recommendation) : undefined,
+    address: row.address ? String(row.address) : undefined,
+    tags: row.tags ? JSON.parse(String(row.tags)) : [],
+    rating: row.rating == null ? undefined : Number(row.rating),
+    lastVisitedAt: row.last_visited_at ? String(row.last_visited_at) : undefined,
+    relatedTrip: row.trip_id && row.trip_title ? { id: String(row.trip_id), title: String(row.trip_title) } : undefined,
     sortOrder: Number(row.sort_order),
     draft: Boolean(row.draft),
     updatedAt: String(row.updated_at),
@@ -764,7 +773,8 @@ function rowToCityPlace(row: Row, photos: CityPhoto[]): CityPlace {
 
 export async function listCityPlaces(includeDrafts = false): Promise<CityPlace[]> {
   const [rows, photoRows] = await Promise.all([
-    all(`SELECT * FROM city_places ${includeDrafts ? '' : 'WHERE draft=0'} ORDER BY city,sort_order,name`),
+    all(`SELECT c.*,t.title AS trip_title FROM city_places c LEFT JOIN trips t ON t.id=c.trip_id
+      ${includeDrafts ? '' : 'WHERE c.draft=0'} ORDER BY c.city,c.favorite DESC,c.sort_order,c.name`),
     all(
       `SELECT p.* FROM city_photos p JOIN city_places c ON c.id=p.place_id
        ${includeDrafts ? '' : 'WHERE c.draft=0'}
@@ -777,7 +787,8 @@ export async function listCityPlaces(includeDrafts = false): Promise<CityPlace[]
 
 export async function getCityPlace(id: string, includeDrafts = false): Promise<CityPlace | undefined> {
   const [row, photoRows] = await Promise.all([
-    first(`SELECT * FROM city_places WHERE id=? ${includeDrafts ? '' : 'AND draft=0'}`, [id]),
+    first(`SELECT c.*,t.title AS trip_title FROM city_places c LEFT JOIN trips t ON t.id=c.trip_id
+      WHERE c.id=? ${includeDrafts ? '' : 'AND c.draft=0'}`, [id]),
     all(
       `SELECT * FROM city_photos WHERE place_id=?
        ORDER BY featured DESC,sort_order IS NULL,sort_order,created_at`,
@@ -801,6 +812,14 @@ export interface CityPlaceInput {
   lat: number;
   lng: number;
   note?: string;
+  visitStatus?: CityVisitStatus;
+  favorite?: boolean;
+  recommendation?: string;
+  address?: string;
+  tags?: string[];
+  rating?: number;
+  lastVisitedAt?: string;
+  tripId?: string;
   draft?: boolean;
 }
 
@@ -809,12 +828,14 @@ export async function createCityPlace(input: CityPlaceInput) {
   const count = await first('SELECT COUNT(*) AS count FROM city_places WHERE city=?', [input.city]);
   await run(
     `INSERT INTO city_places
-     (id,city,name,type,district,lat,lng,note,sort_order,draft,updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+     (id,city,name,type,district,lat,lng,note,visit_status,favorite,recommendation,address,tags,rating,last_visited_at,trip_id,sort_order,draft,updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       input.id, input.city, input.name, input.type, input.district ?? null,
-      input.lat, input.lng, input.note ?? null, Number(count?.count),
-      input.draft ? 1 : 0, new Date().toISOString(),
+      input.lat, input.lng, input.note ?? null, input.visitStatus ?? 'want', input.favorite ? 1 : 0,
+      input.recommendation ?? null, input.address ?? null, JSON.stringify(input.tags ?? []), input.rating ?? null,
+      input.lastVisitedAt ?? null, input.tripId ?? null, Number(count?.count), input.draft ? 1 : 0,
+      new Date().toISOString(),
     ],
   );
   return input.id;
@@ -822,10 +843,13 @@ export async function createCityPlace(input: CityPlaceInput) {
 
 export async function updateCityPlace(id: string, input: CityPlaceInput) {
   await run(
-    `UPDATE city_places SET city=?,name=?,type=?,district=?,lat=?,lng=?,note=?,draft=?,updated_at=? WHERE id=?`,
+    `UPDATE city_places SET city=?,name=?,type=?,district=?,lat=?,lng=?,note=?,visit_status=?,favorite=?,
+      recommendation=?,address=?,tags=?,rating=?,last_visited_at=?,trip_id=?,draft=?,updated_at=? WHERE id=?`,
     [
       input.city, input.name, input.type, input.district ?? null, input.lat, input.lng,
-      input.note ?? null, input.draft ? 1 : 0, new Date().toISOString(), id,
+      input.note ?? null, input.visitStatus ?? 'want', input.favorite ? 1 : 0,
+      input.recommendation ?? null, input.address ?? null, JSON.stringify(input.tags ?? []), input.rating ?? null,
+      input.lastVisitedAt ?? null, input.tripId ?? null, input.draft ? 1 : 0, new Date().toISOString(), id,
     ],
   );
 }

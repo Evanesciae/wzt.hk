@@ -57,6 +57,7 @@ export interface PhotoVariant { width: number; height: number; path: string; siz
 
 export type CitySlug = 'hong-kong' | 'singapore';
 export type CityPlaceType = '山野自然' | '城市景观' | '建筑街区' | '文化艺术' | '餐饮' | '商店市集';
+export type CityVisitStatus = 'want' | 'visited';
 
 export interface CityPhoto {
   id: string;
@@ -79,6 +80,14 @@ export interface CityPlace {
   lat: number;
   lng: number;
   note?: string;
+  visitStatus: CityVisitStatus;
+  favorite: boolean;
+  recommendation?: string;
+  address?: string;
+  tags: string[];
+  rating?: number;
+  lastVisitedAt?: string;
+  relatedTrip?: { id: string; title: string };
   sortOrder: number;
   draft: boolean;
   updatedAt: string;
