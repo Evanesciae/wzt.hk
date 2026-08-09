@@ -1,76 +1,150 @@
 ---
 import { getCollection } from 'astro:content';
 import BaseLayout from '../layouts/BaseLayout.astro';
-import KbCard from '../components/KbCard.astro';
 import TravelCard from '../components/TravelCard.astro';
-import { listFlights, listKbNotes, listTrips } from '../server/database';
+import { categoryTitle, formatDate } from '../lib/content';
+import { cityName } from '../data/cities';
+import { listCityPlaces, listFlights, listKbNotes, listTrips } from '../server/database';
 
-const [notes, trips, flights] = await Promise.all([listKbNotes(), listTrips(), listFlights()]);
+const [notes, trips, flights, places] = await Promise.all([
+  listKbNotes(), listTrips(), listFlights(), listCityPlaces(),
+]);
 const links = (await getCollection('links')).sort((a, b) => a.data.order - b.data.order);
 const currentTrip = trips.find((trip) => trip.status === 'upcoming')
   ?? trips.find((trip) => trip.status === 'planning');
-const pinnedLinks = links.filter((link) => link.data.pinned).slice(0, 4);
+const pinnedLinks = links.filter((link) => link.data.pinned).slice(0, 6);
+const date = (value: string) => new Date(`${value.slice(0, 10)}T00:00:00`);
+
+const recentItems = [
+  ...notes.map((note) => ({
+    type: '知识', title: note.title, summary: note.summary,
+    href: `/kb/${note.id}/`, updatedAt: note.updatedAt, meta: categoryTitle(note.category),
+  })),
+  ...trips.map((trip) => ({
+    type: '旅行', title: trip.title, summary: trip.summary,
+    href: `/travel/${trip.id}/`, updatedAt: trip.updatedAt, meta: trip.destination,
+  })),
+  ...places.map((place) => ({
+    type: '城市', title: place.name, summary: place.recommendation ?? place.note ?? `${place.type} · ${place.district ?? cityName(place.city)}`,
+    href: `/cities/${place.city}/${place.id}/`, updatedAt: place.updatedAt, meta: cityName(place.city),
+  })),
+].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 6);
+
+const searchIndex = [
+  ...notes.map((note) => ({ type: '知识', title: note.title, meta: `${categoryTitle(note.category)} · ${note.tags.join(' · ')}`, href: `/kb/${note.id}/`, search: `${note.title} ${note.summary} ${note.tags.join(' ')}` })),
+  ...trips.map((trip) => ({ type: '旅行', title: trip.title, meta: trip.destination, href: `/travel/${trip.id}/`, search: `${trip.title} ${trip.destination} ${trip.summary}` })),
+  ...places.map((place) => ({ type: '城市', title: place.name, meta: `${cityName(place.city)} · ${place.type}`, href: `/cities/${place.city}/${place.id}/`, search: `${place.name} ${place.type} ${place.district ?? ''} ${place.address ?? ''} ${place.tags.join(' ')}` })),
+  ...flights.map((flight) => ({ type: '航班', title: `${flight.fromAirport.code} → ${flight.toAirport.code}`, meta: `${flight.date.slice(0, 10)} · ${flight.flightNumber || '航班待确认'}`, href: `/travel/flights/${flight.id}/`, search: `${flight.flightNumber} ${flight.airlineName ?? ''} ${flight.fromAirport.code} ${flight.fromAirport.city} ${flight.toAirport.code} ${flight.toAirport.city}` })),
+];
 ---
 
 <BaseLayout>
   <div class="container home-shell">
-    <section class="portal-grid" aria-label="主要区域">
-      <a class="portal-card" href="/kb/">
-        <span class="portal-icon">K</span>
-        <div><h2>知识库</h2><p>{notes.length} 篇笔记</p></div>
-        <span class="portal-arrow">→</span>
-      </a>
-      <a class="portal-card" href="/travel/">
-        <span class="portal-icon">T</span>
-        <div><h2>旅行</h2><p>{trips.length} 个计划 · {flights.length} 段航班</p></div>
-        <span class="portal-arrow">→</span>
-      </a>
-      <a class="portal-card" href="/cities/">
-        <span class="portal-icon">C</span>
-        <div><h2>城市探索</h2><p>香港 · 新加坡</p></div>
-        <span class="portal-arrow">→</span>
-      </a>
-      <a class="portal-card" href="/links/">
-        <span class="portal-icon">L</span>
-        <div><h2>常用链接</h2><p>{links.length} 个入口</p></div>
-        <span class="portal-arrow">→</span>
-      </a>
+    <section class="home-search" aria-label="全站搜索">
+      <button class="global-search-trigger" type="button" data-search-open>
+        <span aria-hidden="true">⌕</span><span>搜索整个网站</span><kbd>⌘ K</kbd>
+      </button>
     </section>
 
-    <div class="home-columns">
-      <section class="home-section">
-        <div class="section-heading">
-          <div><p class="eyebrow">RECENT NOTES</p><h2>最近更新</h2></div>
-          <a class="text-link" href="/kb/">查看全部 →</a>
+    <section class="home-overview">
+      <aside class="home-current">
+        <div class="section-heading compact">
+          <div><p class="eyebrow">NEXT JOURNEY</p><h2>下一段旅程</h2></div>
         </div>
-        <div class="stack-list">
-          {notes.slice(0, 3).map((note) => <KbCard note={note} />)}
-        </div>
-      </section>
-
-      <aside class="home-aside">
-        <section class="aside-panel">
-          <div class="section-heading compact">
-            <div><p class="eyebrow">NEXT JOURNEY</p><h2>下一段旅程</h2></div>
-          </div>
-          {currentTrip
-            ? <TravelCard entry={currentTrip} />
-            : <p class="empty-note">暂时没有计划中的旅行。</p>}
-        </section>
-
-        <section class="aside-panel quick-links">
-          <div class="section-heading compact">
-            <div><p class="eyebrow">PINNED</p><h2>快速入口</h2></div>
-          </div>
-          <div class="quick-link-list">
-            {pinnedLinks.map((link) => (
-              <a href={link.data.url} target="_blank" rel="noreferrer">
-                <span>{link.data.title}</span><span>↗</span>
-              </a>
-            ))}
-          </div>
-        </section>
+        {currentTrip ? <TravelCard entry={currentTrip} /> : <p class="empty-note">暂时没有计划中的旅行。</p>}
       </aside>
-    </div>
+      <nav class="portal-grid home-portals" aria-label="主要区域">
+        <a class="portal-card" href="/travel/">
+          <span class="portal-icon">T</span>
+          <div><h2>旅行</h2><p>{trips.length} 个计划 · {flights.length} 段航班</p></div>
+          <span class="portal-arrow">→</span>
+        </a>
+        <a class="portal-card" href="/kb/">
+          <span class="portal-icon">K</span>
+          <div><h2>知识库</h2><p>{notes.length} 篇笔记</p></div>
+          <span class="portal-arrow">→</span>
+        </a>
+        <a class="portal-card" href="/cities/">
+          <span class="portal-icon">C</span>
+          <div><h2>城市探索</h2><p>{places.length} 个地点</p></div>
+          <span class="portal-arrow">→</span>
+        </a>
+      </nav>
+    </section>
+
+    <section class="home-recent">
+      <div class="section-heading">
+        <div><p class="eyebrow">LATEST</p><h2>最近更新</h2></div>
+      </div>
+      <div class="recent-grid">
+        {recentItems.map((item) => (
+          <a class="recent-item" href={item.href}>
+            <div><span>{item.type} · {item.meta}</span><time>{formatDate(date(item.updatedAt))}</time></div>
+            <h3>{item.title}</h3>
+            <p>{item.summary}</p>
+          </a>
+        ))}
+      </div>
+    </section>
+
+    {pinnedLinks.length > 0 && <section class="home-quick-tools">
+      <div class="section-heading compact"><div><p class="eyebrow">QUICK TOOLS</p><h2>快速入口</h2></div><a class="text-link" href="/links/">全部链接 →</a></div>
+      <div class="quick-tool-row">
+        {pinnedLinks.map((link) => <a href={link.data.url} target="_blank" rel="noreferrer"><span>{link.data.title}</span><span>↗</span></a>)}
+        <a href="https://paste.wzt.hk"><span>Paste</span><span>↗</span></a>
+      </div>
+    </section>}
   </div>
+
+  <dialog class="global-search-dialog" data-search-dialog aria-labelledby="global-search-title">
+    <div class="global-search-shell">
+      <header>
+        <label><span aria-hidden="true">⌕</span><input type="search" placeholder="搜索知识、旅行、地点或航班…" data-global-search /></label>
+        <button type="button" data-search-close aria-label="关闭搜索">×</button>
+      </header>
+      <h2 id="global-search-title" class="sr-only">全站搜索</h2>
+      <div class="global-search-results" data-search-results></div>
+      <p class="global-search-hint" data-search-hint>输入关键词开始搜索；也可以搜索机场代码或航班号。</p>
+    </div>
+  </dialog>
 </BaseLayout>
+
+<script is:inline define:vars={{ searchIndex }}>
+  const dialog = document.querySelector('[data-search-dialog]');
+  const input = document.querySelector('[data-global-search]');
+  const results = document.querySelector('[data-search-results]');
+  const hint = document.querySelector('[data-search-hint]');
+  const normalize = (value) => String(value ?? '').toLocaleLowerCase().normalize('NFKC');
+  const openSearch = () => {
+    if (!dialog) return;
+    dialog.showModal();
+    setTimeout(() => input?.focus(), 0);
+  };
+  const closeSearch = () => dialog?.close();
+  document.querySelector('[data-search-open]')?.addEventListener('click', openSearch);
+  document.querySelector('[data-search-close]')?.addEventListener('click', closeSearch);
+  dialog?.addEventListener('click', (event) => { if (event.target === dialog) closeSearch(); });
+  window.addEventListener('keydown', (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+      event.preventDefault(); openSearch();
+    }
+  });
+  input?.addEventListener('input', () => {
+    const query = normalize(input.value.trim());
+    results.innerHTML = '';
+    if (!query) { hint.hidden = false; return; }
+    const matches = searchIndex.filter((item) => normalize(`${item.title} ${item.meta} ${item.search}`).includes(query)).slice(0, 10);
+    hint.hidden = true;
+    if (matches.length === 0) {
+      const empty = document.createElement('p'); empty.className = 'global-search-empty'; empty.textContent = '没有找到匹配内容。'; results.append(empty); return;
+    }
+    matches.forEach((item) => {
+      const link = document.createElement('a'); link.href = item.href;
+      const identity = document.createElement('span');
+      const title = document.createElement('strong'); title.textContent = item.title;
+      const meta = document.createElement('small'); meta.textContent = `${item.type} · ${item.meta}`;
+      const arrow = document.createElement('span'); arrow.textContent = '→';
+      identity.append(title, meta); link.append(identity, arrow); results.append(link);
+    });
+  });
+</script>
