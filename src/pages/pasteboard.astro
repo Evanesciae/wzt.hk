@@ -1,0 +1,552 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+---
+
+<BaseLayout title="粘贴板" description="粘贴板">
+  <div class="container pasteboard-shell">
+    <header class="pasteboard-header">
+      <h1>粘贴板</h1>
+    </header>
+
+    <section class="composer" aria-label="添加内容">
+      <label for="paste-input">粘贴内容</label>
+      <textarea
+        id="paste-input"
+        maxlength="20000"
+        rows="6"
+        placeholder="粘贴文本、链接或代码"
+        autocomplete="off"
+        spellcheck="false"
+      ></textarea>
+      <div class="composer-actions">
+        <span class="character-count"><span data-char-count>0</span> / 20,000</span>
+        <div>
+          <button class="secondary-button" type="button" data-read-clipboard>读取剪贴板</button>
+          <label class="secondary-button upload-button" title="最大 25 MB">
+            <span data-upload-label>上传文件</span>
+            <input type="file" data-file-input />
+          </label>
+          <button class="submit-button" type="button" data-submit disabled>
+            <span data-submit-label>添加</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section class="board" aria-labelledby="board-heading">
+      <div class="board-header">
+        <h2 id="board-heading">历史记录</h2>
+        <span>24 小时后自动删除</span>
+      </div>
+
+      <div class="skeleton-list" data-skeleton aria-label="正在载入">
+        <div class="skeleton-card"><span></span><span></span></div>
+        <div class="skeleton-card"><span></span><span></span></div>
+      </div>
+      <div class="empty-state" data-empty hidden>
+        <p>暂无内容</p>
+      </div>
+      <div class="item-list" data-item-list aria-live="polite"></div>
+    </section>
+  </div>
+
+  <div class="toast" data-toast role="status" aria-live="polite"></div>
+
+    <script>
+      type PasteType = 'text' | 'link' | 'code' | 'json' | 'file';
+      type PasteItem = {
+        id: string;
+        content: string;
+        type: PasteType;
+        createdAt: string;
+        fileName?: string;
+        mimeType?: string;
+        fileSize?: number;
+      };
+
+      const input = document.querySelector<HTMLTextAreaElement>('#paste-input')!;
+      const submit = document.querySelector<HTMLButtonElement>('[data-submit]')!;
+      const submitLabel = document.querySelector<HTMLElement>('[data-submit-label]')!;
+      const charCount = document.querySelector<HTMLElement>('[data-char-count]')!;
+      const fileInput = document.querySelector<HTMLInputElement>('[data-file-input]')!;
+      const uploadLabel = document.querySelector<HTMLElement>('[data-upload-label]')!;
+      const list = document.querySelector<HTMLElement>('[data-item-list]')!;
+      const empty = document.querySelector<HTMLElement>('[data-empty]')!;
+      const skeleton = document.querySelector<HTMLElement>('[data-skeleton]')!;
+      const toast = document.querySelector<HTMLElement>('[data-toast]')!;
+      const channelEvents = 'BroadcastChannel' in window ? new BroadcastChannel('wzt-pasteboard') : null;
+
+      let items: PasteItem[] = [];
+      let channel = '';
+      let loaded = false;
+      let syncing = false;
+      let toastTimer = 0;
+
+      async function hashRoom(key: string) {
+        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(key));
+        return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+      }
+
+      function cacheKey() {
+        return `pasteboard-cache-${channel.slice(0, 16)}`;
+      }
+
+      function readCache() {
+        try {
+          const cached = JSON.parse(localStorage.getItem(cacheKey()) ?? '[]');
+          if (Array.isArray(cached)) items = cached.slice(0, 100);
+        } catch { /* Ignore a stale local cache. */ }
+      }
+
+      function writeCache() {
+        localStorage.setItem(cacheKey(), JSON.stringify(items.slice(0, 100)));
+      }
+
+      function showToast(message: string) {
+        window.clearTimeout(toastTimer);
+        toast.textContent = message;
+        toast.classList.add('is-visible');
+        toastTimer = window.setTimeout(() => toast.classList.remove('is-visible'), 2200);
+      }
+
+      function classify(content: string): PasteType {
+        if (/^https?:\/\/\S+$/i.test(content)) return 'link';
+        try {
+          const value = JSON.parse(content);
+          if (value && typeof value === 'object') return 'json';
+        } catch { /* Plain text is expected most of the time. */ }
+        if (/\n/.test(content) && /[{}();=>]|^\s{2,}|\b(const|let|function|class|SELECT|FROM|import)\b/m.test(content)) return 'code';
+        return 'text';
+      }
+
+      function typeLabel(type: PasteType) {
+        return ({ text: '文本', link: '链接', code: '代码', json: 'JSON', file: '文件' })[type];
+      }
+
+      function formatSize(value = 0) {
+        if (value < 1024) return `${value} B`;
+        if (value < 1024 * 1024) return `${(value / 1024).toFixed(value < 10 * 1024 ? 1 : 0)} KB`;
+        return `${(value / 1024 / 1024).toFixed(1)} MB`;
+      }
+
+      function formatTime(value: string) {
+        const date = new Date(value);
+        const distance = Date.now() - date.getTime();
+        if (distance < 60_000) return '刚刚';
+        if (distance < 3_600_000) return `${Math.floor(distance / 60_000)} 分钟前`;
+        if (distance < 86_400_000) return `${Math.floor(distance / 3_600_000)} 小时前`;
+        return new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(date);
+      }
+
+      async function copyText(value: string) {
+        let copied = false;
+        try {
+          copied = await Promise.race([
+            navigator.clipboard.writeText(value).then(() => true).catch(() => false),
+            new Promise<boolean>((resolve) => window.setTimeout(() => resolve(false), 700)),
+          ]);
+        } catch { /* Use the selection fallback below. */ }
+        if (!copied) {
+          const helper = document.createElement('textarea');
+          helper.value = value;
+          helper.style.position = 'fixed';
+          helper.style.opacity = '0';
+          document.body.append(helper);
+          helper.select();
+          copied = typeof document.execCommand === 'function' && document.execCommand('copy');
+          helper.remove();
+        }
+        return copied;
+      }
+
+      function makeItemCard(item: PasteItem) {
+        const article = document.createElement('article');
+        article.className = 'paste-card';
+        article.dataset.id = item.id;
+
+        const top = document.createElement('div');
+        top.className = 'card-topline';
+        const meta = document.createElement('div');
+        meta.className = 'card-meta';
+        const badge = document.createElement('span');
+        badge.className = `type-badge type-${item.type}`;
+        badge.textContent = typeLabel(item.type);
+        const time = document.createElement('time');
+        time.dateTime = item.createdAt;
+        time.textContent = formatTime(item.createdAt);
+        time.title = new Date(item.createdAt).toLocaleString('zh-CN');
+        meta.append(badge, time);
+
+        const actions = document.createElement('div');
+        actions.className = 'card-actions';
+        if (item.type === 'file') {
+          const download = document.createElement('a');
+          download.className = 'download-button';
+          download.href = `/api/pasteboard/files/${encodeURIComponent(item.id)}?channel=${channel}`;
+          download.textContent = '下载';
+          actions.append(download);
+        } else {
+          const copy = document.createElement('button');
+          copy.type = 'button';
+          copy.className = 'copy-button';
+          copy.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 6V4.8C7 3.8 7.8 3 8.8 3h6.4c1 0 1.8.8 1.8 1.8v6.4c0 1-.8 1.8-1.8 1.8H14M4.8 7h6.4c1 0 1.8.8 1.8 1.8v6.4c0 1-.8 1.8-1.8 1.8H4.8c-1 0-1.8-.8-1.8-1.8V8.8C3 7.8 3.8 7 4.8 7Z" /></svg><span>复制</span>';
+          copy.addEventListener('click', async () => {
+            const copied = await copyText(item.content);
+            if (!copied) {
+              showToast('复制失败，请手动复制');
+              return;
+            }
+            copy.classList.add('is-copied');
+            copy.querySelector('span')!.textContent = '已复制';
+            window.setTimeout(() => {
+              copy.classList.remove('is-copied');
+              copy.querySelector('span')!.textContent = '复制';
+            }, 1600);
+          });
+          actions.append(copy);
+        }
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'delete-button';
+        remove.setAttribute('aria-label', '删除这条内容');
+        remove.title = '删除';
+        remove.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h12m-7-3h2a1 1 0 0 1 1 1v2H8V4a1 1 0 0 1 1-1Zm-3 3 .7 10.1a1 1 0 0 0 1 .9h4.6a1 1 0 0 0 1-.9L14 6M8.5 9v5m3-5v5" /></svg>';
+        remove.addEventListener('click', () => removeItem(item, article));
+        actions.append(remove);
+        top.append(meta, actions);
+
+        let content: HTMLElement;
+        if (item.type === 'file') {
+          content = document.createElement('a');
+          content.className = 'card-content file-content';
+          (content as HTMLAnchorElement).href = `/api/pasteboard/files/${encodeURIComponent(item.id)}?channel=${channel}`;
+          const name = document.createElement('strong');
+          name.textContent = item.fileName ?? item.content;
+          const size = document.createElement('span');
+          size.textContent = formatSize(item.fileSize);
+          content.append(name, size);
+        } else if (item.type === 'link') {
+          content = document.createElement('a');
+          content.className = 'card-content link-content';
+          (content as HTMLAnchorElement).href = item.content;
+          (content as HTMLAnchorElement).target = '_blank';
+          (content as HTMLAnchorElement).rel = 'noreferrer';
+        } else if (item.type === 'code' || item.type === 'json') {
+          content = document.createElement('pre');
+          content.className = 'card-content code-content';
+        } else {
+          content = document.createElement('p');
+          content.className = 'card-content';
+        }
+        if (item.type !== 'file') content.textContent = item.content;
+        article.append(top, content);
+        return article;
+      }
+
+      function render() {
+        list.replaceChildren(...items.map(makeItemCard));
+        skeleton.hidden = true;
+        empty.hidden = !loaded || items.length > 0;
+      }
+
+      function refreshTimes() {
+        list.querySelectorAll<HTMLTimeElement>('time').forEach((time) => {
+          time.textContent = formatTime(time.dateTime);
+        });
+      }
+
+      async function syncItems(silent = false) {
+        if (syncing || !channel) return;
+        syncing = true;
+        try {
+          const response = await fetch(`/api/pasteboard?channel=${channel}`, { cache: 'no-store' });
+          if (!response.ok) throw new Error('sync failed');
+          const data = await response.json();
+          const nextItems: PasteItem[] = data.items;
+          const changed = JSON.stringify(nextItems) !== JSON.stringify(items);
+          const firstLoad = !loaded;
+          items = nextItems;
+          loaded = true;
+          writeCache();
+          if (changed || firstLoad) render();
+          else refreshTimes();
+        } catch {
+          const firstLoad = !loaded;
+          loaded = true;
+          if (firstLoad) render();
+          if (!silent) showToast('同步失败，请检查网络');
+        } finally {
+          syncing = false;
+        }
+      }
+
+      async function addItem() {
+        const content = input.value.trim();
+        if (!content || submit.disabled) return;
+        submit.disabled = true;
+        submit.classList.add('is-loading');
+        submitLabel.textContent = '正在添加';
+        try {
+          const response = await fetch('/api/pasteboard', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channel, content, type: classify(content) }),
+          });
+          if (!response.ok) throw new Error('create failed');
+          const data = await response.json();
+          items = [data.item, ...items.filter((item) => item.id !== data.item.id)].slice(0, 100);
+          loaded = true;
+          input.value = '';
+          input.dispatchEvent(new Event('input'));
+          writeCache();
+          render();
+          channelEvents?.postMessage('refresh');
+          showToast('已添加');
+          input.focus();
+        } catch {
+          showToast('添加失败，请检查网络');
+        } finally {
+          submit.classList.remove('is-loading');
+          submitLabel.textContent = '添加';
+          submit.disabled = !input.value.trim();
+        }
+      }
+
+      async function uploadFile(file: File) {
+        if (!file.size || file.size > 25 * 1024 * 1024) {
+          showToast('文件不能超过 25 MB');
+          fileInput.value = '';
+          return;
+        }
+        fileInput.disabled = true;
+        uploadLabel.textContent = '上传中';
+        const form = new FormData();
+        form.set('channel', channel);
+        form.set('file', file);
+        try {
+          const response = await fetch('/api/pasteboard/files', { method: 'POST', body: form });
+          if (!response.ok) throw new Error('upload failed');
+          const data = await response.json();
+          items = [data.item, ...items.filter((item) => item.id !== data.item.id)].slice(0, 100);
+          loaded = true;
+          writeCache();
+          render();
+          channelEvents?.postMessage('refresh');
+          showToast('已上传');
+        } catch {
+          showToast('上传失败，请检查网络');
+        } finally {
+          fileInput.disabled = false;
+          fileInput.value = '';
+          uploadLabel.textContent = '上传文件';
+        }
+      }
+
+      async function removeItem(item: PasteItem, article: HTMLElement) {
+        article.classList.add('is-removing');
+        try {
+          const response = await fetch(`/api/pasteboard/${encodeURIComponent(item.id)}?channel=${channel}`, { method: 'DELETE' });
+          if (!response.ok) throw new Error('delete failed');
+          items = items.filter((candidate) => candidate.id !== item.id);
+          writeCache();
+          render();
+          channelEvents?.postMessage('refresh');
+          showToast('已删除');
+        } catch {
+          article.classList.remove('is-removing');
+          showToast('删除失败，请稍后再试');
+        }
+      }
+
+      input.addEventListener('input', () => {
+        charCount.textContent = String(input.value.length);
+        submit.disabled = !input.value.trim();
+      });
+      input.addEventListener('keydown', (event) => {
+        if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+          event.preventDefault();
+          addItem();
+        }
+      });
+      submit.addEventListener('click', addItem);
+      fileInput.addEventListener('change', () => {
+        const file = fileInput.files?.[0];
+        if (file) uploadFile(file);
+      });
+      document.querySelector('[data-read-clipboard]')?.addEventListener('click', async () => {
+        try {
+          input.value = await navigator.clipboard.readText();
+          input.dispatchEvent(new Event('input'));
+          input.focus();
+        } catch {
+          showToast('浏览器没有允许读取剪贴板，可以直接粘贴');
+          input.focus();
+        }
+      });
+
+      channelEvents?.addEventListener('message', () => syncItems(true));
+      window.addEventListener('online', () => syncItems());
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') syncItems(true);
+      });
+
+      async function start() {
+        channel = await hashRoom('wzt.hk:pasteboard:default');
+        if (location.hash) history.replaceState(null, '', `${location.pathname}${location.search}`);
+        readCache();
+        if (items.length) render();
+        await syncItems(true);
+        window.setInterval(() => syncItems(true), 5000);
+      }
+      start();
+  </script>
+</BaseLayout>
+
+
+<style>
+  :root {
+    --accent: #3f6e63;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+  }
+
+  .pasteboard-shell { max-width: 900px; padding-top: 72px; }
+
+  .pasteboard-header {
+    margin-bottom: 34px;
+  }
+
+  .pasteboard-header h1 {
+    margin: 0;
+    font-size: clamp(32px, 5vw, 46px);
+    font-weight: 650;
+    letter-spacing: -.04em;
+    line-height: 1.2;
+  }
+
+  .composer {
+    position: static;
+    padding: 20px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    background: var(--bg);
+    box-shadow: var(--shadow);
+  }
+
+  .composer::before { display: none; }
+  .composer > label { display: block; color: var(--text-2); font-size: 13px; font-weight: 600; }
+
+  textarea {
+    display: block;
+    width: 100%;
+    min-height: 148px;
+    margin: 12px 0 16px;
+    padding: 0;
+    resize: vertical;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.7;
+  }
+
+  textarea::placeholder { color: var(--text-3); }
+
+  .composer-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+
+  .composer-actions > div { display: flex; gap: 8px; }
+  .character-count { color: var(--text-3); font-size: 11px; }
+
+  .secondary-button,
+  .submit-button {
+    min-width: 0;
+    height: 34px;
+    padding: 0 12px;
+    border-radius: 6px;
+    box-shadow: none;
+    font-size: 13px;
+    font-weight: 550;
+    cursor: pointer;
+  }
+
+  .secondary-button { display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line); background: var(--bg); color: var(--text-2); }
+  .secondary-button:hover { border-color: var(--line-strong); background: var(--bg-soft); color: var(--text); }
+  .upload-button input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
+  .submit-button { border: 1px solid var(--text); background: var(--text); color: var(--bg); }
+  .submit-button:hover:not(:disabled) { background: var(--text); transform: none; }
+  .submit-button:disabled { opacity: .35; cursor: not-allowed; }
+
+  .board { padding: 64px 0 20px; }
+  .board-header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+  .board-header h2 { margin: 0; font-size: 17px; font-weight: 620; letter-spacing: -.015em; }
+  .board-header > span { color: var(--text-3); font-size: 11px; }
+
+  .item-list { display: grid; gap: 10px; padding-top: 14px; }
+
+  :global(.paste-card) {
+    position: relative;
+    padding: 17px 18px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--bg);
+    transition: border-color .16s ease, box-shadow .16s ease, opacity .2s, transform .2s;
+  }
+
+  :global(.paste-card:hover) { border-color: var(--line-strong); box-shadow: var(--shadow); }
+  :global(.paste-card.is-removing) { opacity: 0; transform: translateX(8px); }
+  :global(.card-topline) { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+  :global(.card-meta), :global(.card-actions) { display: flex; align-items: center; gap: 8px; }
+  :global(.card-meta time) { color: var(--text-3); font: 11px/1.4 var(--font-sans); }
+  :global(.type-badge) { padding: 2px 6px; border-radius: 4px; background: var(--bg-soft); color: var(--text-2); font: 11px/1.5 var(--font-sans); letter-spacing: 0; }
+  :global(.type-link) { background: var(--accent-soft); color: var(--accent); }
+  :global(.type-code), :global(.type-json) { background: var(--private-bg); color: var(--private-text); }
+  :global(.copy-button), :global(.download-button), :global(.delete-button) { height: 30px; border: 0; border-radius: 5px; background: transparent; color: var(--text-3); cursor: pointer; }
+  :global(.copy-button) { display: flex; align-items: center; gap: 6px; padding: 0 8px; font-size: 12px; }
+  :global(.download-button) { display: inline-flex; align-items: center; padding: 0 8px; font-size: 12px; }
+  :global(.delete-button) { display: grid; width: 30px; padding: 0; place-items: center; }
+  :global(.copy-button:hover), :global(.download-button:hover), :global(.delete-button:hover) { background: var(--bg-soft); color: var(--text); }
+  :global(.copy-button.is-copied) { color: var(--accent); }
+  :global(.copy-button svg), :global(.delete-button svg) { width: 15px; height: 15px; }
+  :global(.card-content) { margin: 0; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.65; }
+  :global(.link-content) { display: block; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+  :global(.file-content) { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; color: var(--text); }
+  :global(.file-content strong) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 550; }
+  :global(.file-content span) { flex: 0 0 auto; color: var(--text-3); font-size: 11px; }
+  :global(.code-content) { max-height: 280px; overflow: auto; padding: 14px 15px; border-radius: 6px; background: #252523; color: #f6f6f4; font: 12px/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; }
+
+  .skeleton-list { display: grid; gap: 10px; padding-top: 14px; }
+  .skeleton-card { height: 96px; padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); }
+  .skeleton-card span { display: block; width: 72%; height: 8px; margin-bottom: 14px; border-radius: 4px; background: linear-gradient(90deg, var(--bg-soft) 25%, var(--bg-hover) 50%, var(--bg-soft) 75%); background-size: 200% 100%; animation: shimmer 1.4s infinite; }
+  .skeleton-card span:first-child { width: 20%; }
+  .empty-state { padding: 64px 20px; color: var(--text-3); text-align: center; }
+  .empty-state p { margin: 0; color: var(--text-3); font: 13px/1.5 var(--font-sans); }
+
+
+  .toast { position: fixed; z-index: 40; left: 50%; bottom: 24px; transform: translate(-50%, 10px); padding: 8px 12px; border-radius: 6px; background: var(--text); color: var(--bg); font-size: 12px; opacity: 0; pointer-events: none; transition: .18s ease; box-shadow: var(--shadow); }
+  .toast.is-visible { opacity: 1; transform: translate(-50%, 0); }
+
+  @keyframes shimmer { to { background-position: -200% 0; } }
+
+  @media (max-width: 620px) {
+    .pasteboard-shell { padding-top: 44px; }
+    .composer { padding: 16px; }
+    .composer-actions { align-items: stretch; flex-direction: column; }
+    .composer-actions > div { justify-content: flex-end; }
+    .submit-button { min-width: 76px; }
+    .board { padding-top: 48px; }
+    :global(.paste-card) { padding: 15px; }
+    :global(.copy-button span) { display: none; }
+    :global(.copy-button) { width: 30px; padding: 0; justify-content: center; }
+  }
+</style>

@@ -3,6 +3,9 @@ import { adminAuthDisabled, getSession, validCsrf, validOrigin } from './server/
 
 export const onRequest = defineMiddleware(async (context, next) => {
   const path = context.url.pathname;
+  if (context.url.hostname === 'paste.wzt.hk' && path === '/') {
+    return context.rewrite('/pasteboard');
+  }
   const isAdminPage = path.startsWith('/admin') && path !== '/admin/login';
   const isAdminApi = path.startsWith('/api/admin');
   const isLoginApi = path === '/api/admin/login';

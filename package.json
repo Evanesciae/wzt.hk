@@ -10,7 +10,7 @@
     "dev": "ASTRO_TELEMETRY_DISABLED=1 astro dev",
     "build": "ASTRO_TELEMETRY_DISABLED=1 astro build",
     "preview": "ASTRO_TELEMETRY_DISABLED=1 astro preview",
-    "cf:dev": "wrangler dev --var LOCAL_MEDIA_ORIGIN:https://wzt.hk",
+    "cf:dev": "wrangler dev --var LOCAL_MEDIA_ORIGIN:https://wzt.hk --inspector-port 0 --show-interactive-dev-session false",
     "cf:types": "CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false wrangler types --include-runtime false",
     "cf:migrate:local": "wrangler d1 migrations apply DB --local",
     "cf:migrate:remote": "wrangler d1 migrations apply DB --remote",
