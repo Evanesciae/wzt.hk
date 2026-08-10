@@ -2,6 +2,7 @@
 import 'maplibre-gl/dist/maplibre-gl.css';
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import { cities, cityName, cityPlaceTypes } from '../../data/cities';
+import { mediaUrl } from '../../lib/media';
 import { listCityPlaces, listTrips } from '../../server/database';
 
 const [places, trips] = await Promise.all([listCityPlaces(true), listTrips(true)]);
@@ -62,7 +63,7 @@ const visitStatusLabel = { want: '想去', visited: '去过' } as const;
                   const thumb = [...photo.variants].sort((a, b) => a.width - b.width)[0];
                   return thumb && (
                     <span class:list={['admin-photo-item', photo.featured && 'is-cover']} draggable="true" data-photo-id={photo.id}>
-                      <img src={`/media/${thumb.path}`} alt={photo.alt} loading="lazy" />
+                      <img src={mediaUrl(thumb.path, photo.id)} alt={photo.alt} loading="lazy" />
                       <button type="button" class="admin-photo-delete" data-delete-city-photo={photo.id} title="删除照片">×</button>
                       {!photo.featured && <button type="button" class="admin-photo-cover" data-set-cover={photo.id}>设为封面</button>}
                     </span>

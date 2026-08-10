@@ -1,5 +1,6 @@
 ---
 import type { TravelEvent } from '../server/types';
+import { mediaUrl } from '../lib/media';
 
 interface Props {
   event: TravelEvent;
@@ -26,7 +27,7 @@ const preparedPhotos = event.photos.map((photo) => {
   return { ...photo, thumb: variants[0], full: variants.at(-1), variants };
 });
 const photoItems = preparedPhotos.map((photo) => ({
-  src: photo.full ? `/media/${photo.full.path}` : '',
+  src: photo.full ? mediaUrl(photo.full.path, photo.id) : '',
   alt: photo.alt,
   caption: photo.caption ?? event.title,
 }));
@@ -77,8 +78,8 @@ const photoItems = preparedPhotos.map((photo) => ({
             aria-label={`查看照片：${photo.alt}`}
           >
             {photo.thumb && <img
-              src={`/media/${photo.thumb.path}`}
-              srcset={photo.variants.map((variant) => `/media/${variant.path} ${variant.width}w`).join(', ')}
+              src={mediaUrl(photo.thumb.path, photo.id)}
+              srcset={photo.variants.map((variant) => `${mediaUrl(variant.path, photo.id)} ${variant.width}w`).join(', ')}
               sizes="160px" alt={photo.alt} loading="lazy" decoding="async"
             />}
             {index === 7 && preparedPhotos.length > 8 && <span>+{preparedPhotos.length - 8}</span>}

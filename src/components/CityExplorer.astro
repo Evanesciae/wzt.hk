@@ -49,6 +49,8 @@ const initialPlaces = places.filter((place) => place.city === initialCity.slug);
 </section>
 
 <script>
+  import { mediaUrl } from '../lib/media';
+
   interface Variant { width: number; height: number; path: string; size: number }
   interface Photo { id: string; featured: boolean; alt: string; variants: Variant[] }
   interface Place {
@@ -108,7 +110,7 @@ const initialPlaces = places.filter((place) => place.city === initialCity.slug);
       const photo = place.photos.find((item) => item.featured) ?? place.photos[0];
       if (!photo) return;
       const variants = [...photo.variants].sort((a, b) => a.width - b.width);
-      return variants[Math.min(1, variants.length - 1)];
+      return { variant: variants[Math.min(1, variants.length - 1)], photoId: photo.id };
     };
 
     function metaLine(place: Place) {
@@ -133,7 +135,7 @@ const initialPlaces = places.filter((place) => place.city === initialCity.slug);
         if (cover) {
           link.className = 'city-photo-card';
           const media = document.createElement('span'); media.className = 'city-place-cover';
-          const image = document.createElement('img'); image.src = `/media/${cover.path}`; image.alt = ''; image.loading = 'lazy'; image.decoding = 'async';
+          const image = document.createElement('img'); image.src = mediaUrl(cover.variant.path, cover.photoId); image.alt = ''; image.loading = 'lazy'; image.decoding = 'async';
           media.append(image); link.append(media, identity(place)); photoListElement.append(link);
         } else {
           link.className = 'city-compact-card'; link.append(identity(place)); compactListElement.append(link);

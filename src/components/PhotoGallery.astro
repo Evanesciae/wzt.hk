@@ -1,5 +1,6 @@
 ---
 import type { TravelPhoto } from '../server/types';
+import { mediaUrl } from '../lib/media';
 type GalleryPhoto = TravelPhoto & {
   dateLabel: string;
   eventTitle: string;
@@ -12,7 +13,7 @@ const prepared = photos.map((photo) => {
   return { ...photo, thumb: variants[Math.min(1, variants.length - 1)], full: variants.at(-1), variants };
 });
 const photoItems = prepared.map((photo) => ({
-  src: photo.full ? `/media/${photo.full.path}` : '',
+  src: photo.full ? mediaUrl(photo.full.path, photo.id) : '',
   alt: photo.alt,
   caption: photo.caption ?? `${photo.dateLabel} · ${photo.eventTitle}`,
 }));
@@ -27,8 +28,8 @@ const photoItems = prepared.map((photo) => ({
       aria-label={`查看照片：${photo.alt}`}
     >
       {photo.thumb && <img
-        src={`/media/${photo.thumb.path}`}
-        srcset={photo.variants.map((variant) => `/media/${variant.path} ${variant.width}w`).join(', ')}
+        src={mediaUrl(photo.thumb.path, photo.id)}
+        srcset={photo.variants.map((variant) => `${mediaUrl(variant.path, photo.id)} ${variant.width}w`).join(', ')}
         sizes="(max-width: 600px) 50vw, 30vw" alt={photo.alt} loading="lazy" decoding="async"
       />}
     </button>

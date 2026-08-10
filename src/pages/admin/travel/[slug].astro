@@ -1,6 +1,7 @@
 ---
 import 'maplibre-gl/dist/maplibre-gl.css';
 import BaseLayout from '../../../layouts/BaseLayout.astro';
+import { mediaUrl } from '../../../lib/media';
 import { getTrip } from '../../../server/database';
 
 const slug = Astro.params.slug;
@@ -45,7 +46,7 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
                     </div>
                     {event.photos.length > 0 && <div class="admin-photo-strip" data-photo-strip>{event.photos.map((photo) => {
                       const thumb = [...photo.variants].sort((a, b) => a.width - b.width)[0];
-                      return thumb && <span class="admin-photo-item" draggable="true" data-photo-id={photo.id}><img src={`/media/${thumb.path}`} alt={photo.alt} loading="lazy" /><button type="button" class="admin-photo-delete" data-delete-photo={photo.id} title="删除照片">×</button></span>;
+                      return thumb && <span class="admin-photo-item" draggable="true" data-photo-id={photo.id}><img src={mediaUrl(thumb.path, photo.id)} alt={photo.alt} loading="lazy" /><button type="button" class="admin-photo-delete" data-delete-photo={photo.id} title="删除照片">×</button></span>;
                     })}</div>}
                   </div>
                   <div class="admin-event-actions">

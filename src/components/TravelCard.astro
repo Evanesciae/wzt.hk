@@ -1,6 +1,7 @@
 ---
 import type { TravelTrip } from '../server/types';
 import { formatDateRange, travelStatus } from '../lib/content';
+import { mediaUrl } from '../lib/media';
 
 interface Props {
   entry: TravelTrip;
@@ -28,7 +29,7 @@ const previewPhotos = entry.previewPhotos.map((photo) => {
     <div class="travel-card-photos" aria-label={`${entry.title}的照片预览`}>
       {previewPhotos.map((photo) => photo.thumb && (
         <img
-          src={`/media/${photo.thumb.path}`}
+          src={mediaUrl(photo.thumb.path, photo.id)}
           alt={photo.alt}
           width={photo.thumb.width}
           height={photo.thumb.height}
