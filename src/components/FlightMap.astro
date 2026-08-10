@@ -27,11 +27,15 @@ const routes = flights.map((flight) => ({
 </div>
 
 <script>
+  import type { CustomLayerInterface, CustomRenderMethodInput } from 'maplibre-gl';
+
   interface RoutePoint { code: string; city: string; lat: number; lng: number }
   interface Route { from: RoutePoint; to: RoutePoint }
-  interface RouteGroup { key: string; from: RoutePoint; to: RoutePoint; count: number }
+  interface RouteGroup { key: string; pairKey: string; from: RoutePoint; to: RoutePoint; count: number }
 
   type Vector3 = [number, number, number];
+  type ArcPoint = [number, number, number];
+  interface ArcLane { points: ArcPoint[]; offset: number }
 
   function toVector(point: RoutePoint): Vector3 {
     const latitude = point.lat * Math.PI / 180;
@@ -49,16 +53,17 @@ const routes = flights.map((flight) => ({
     return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
   }
 
-  function curvedArc(from: RoutePoint, to: RoutePoint, direction: number): [number, number][] {
+  function elevatedArc(from: RoutePoint, to: RoutePoint, direction: number, altitudeScale = 1): ArcPoint[] {
     const start = toVector(from);
     const end = toVector(to);
     const dot = Math.min(1, Math.max(-1, start[0] * end[0] + start[1] * end[1] + start[2] * end[2]));
     const angle = Math.acos(dot);
     const denominator = Math.sin(angle);
     const normal = normalize(cross(start, end));
-    const bend = direction * Math.min(Math.max(angle * .28, .025), .11);
-    const steps = Math.max(40, Math.ceil(angle * 48));
-    const coordinates: [number, number][] = [];
+    const lateralBend = direction * Math.min(Math.max(angle * .035, .0035), .014);
+    const peakAltitude = Math.min(Math.max(angle * 6_371_008.8 * .23, 120_000), 850_000);
+    const steps = Math.max(56, Math.ceil(angle * 72));
+    const coordinates: ArcPoint[] = [];
     let previousLongitude = from.lng;
 
     for (let index = 0; index <= steps; index += 1) {
@@ -70,7 +75,7 @@ const routes = flights.map((flight) => ({
         startWeight * start[1] + endWeight * end[1],
         startWeight * start[2] + endWeight * end[2],
       ]);
-      const offset = Math.sin(Math.PI * t) * bend;
+      const offset = Math.sin(Math.PI * t) * lateralBend;
       const [x, y, z] = normalize([
         base[0] * Math.cos(offset) + normal[0] * Math.sin(offset),
         base[1] * Math.cos(offset) + normal[1] * Math.sin(offset),
@@ -78,10 +83,11 @@ const routes = flights.map((flight) => ({
       ]);
       let longitude = Math.atan2(y, x) * 180 / Math.PI;
       const latitude = Math.atan2(z, Math.sqrt(x * x + y * y)) * 180 / Math.PI;
+      const altitude = Math.pow(Math.sin(Math.PI * t), .82) * peakAltitude * altitudeScale;
 
       while (longitude - previousLongitude > 180) longitude -= 360;
       while (longitude - previousLongitude < -180) longitude += 360;
-      coordinates.push([longitude, latitude]);
+      coordinates.push([longitude, latitude, altitude]);
       previousLongitude = longitude;
     }
     return coordinates;
@@ -93,16 +99,197 @@ const routes = flights.map((flight) => ({
       const ordered = route.from.code.localeCompare(route.to.code) <= 0
         ? [route.from, route.to]
         : [route.to, route.from];
-      const key = `${ordered[0].code}-${ordered[1].code}`;
+      const pairKey = `${ordered[0].code}-${ordered[1].code}`;
+      const key = `${route.from.code}-${route.to.code}`;
       const existing = groups.get(key);
       if (existing) existing.count += 1;
-      else groups.set(key, { key, from: ordered[0], to: ordered[1], count: 1 });
+      else groups.set(key, { key, pairKey, from: route.from, to: route.to, count: 1 });
     });
     return [...groups.values()];
   }
 
   function curveDirection(key: string) {
     return [...key].reduce((hash, character) => hash + character.charCodeAt(0), 0) % 2 === 0 ? 1 : -1;
+  }
+
+  function bundleOffsets(count: number) {
+    if (count >= 8) return [-4.2, 0, 4.2];
+    if (count >= 4) return [-2.8, 2.8];
+    return [0];
+  }
+
+  function toMercator([longitude, latitude, altitude]: ArcPoint): [number, number, number] {
+    const limitedLatitude = Math.max(-85.051129, Math.min(85.051129, latitude));
+    const radians = limitedLatitude * Math.PI / 180;
+    return [
+      (longitude + 180) / 360,
+      (1 - Math.log(Math.tan(radians) + 1 / Math.cos(radians)) / Math.PI) / 2,
+      altitude,
+    ];
+  }
+
+  function arcVertices(arcs: ArcLane[]): Float32Array {
+    const vertices: number[] = [];
+    const addVertex = (arc: ArcLane, index: number, side: number) => {
+      const point = arc.points[index];
+      const previous = arc.points[Math.max(0, index - 1)];
+      const next = arc.points[Math.min(arc.points.length - 1, index + 1)];
+      const lane = arc.offset * Math.sin(Math.PI * index / (arc.points.length - 1));
+      vertices.push(...toMercator(point), ...toMercator(previous), ...toMercator(next), side, lane);
+    };
+    arcs.forEach((arc) => {
+      for (let index = 0; index < arc.points.length - 1; index += 1) {
+        addVertex(arc, index, -1);
+        addVertex(arc, index, 1);
+        addVertex(arc, index + 1, -1);
+        addVertex(arc, index + 1, -1);
+        addVertex(arc, index, 1);
+        addVertex(arc, index + 1, 1);
+      }
+    });
+    return new Float32Array(vertices);
+  }
+
+  function createArcLayer(arcs: ArcLane[], dark: boolean): CustomLayerInterface {
+    const vertexData = arcVertices(arcs);
+    let buffer: WebGLBuffer | null = null;
+    let program: WebGLProgram | null = null;
+    let shaderVariant = '';
+
+    const compileShader = (gl: WebGL2RenderingContext, type: number, source: string) => {
+      const shader = gl.createShader(type);
+      if (!shader) throw new Error('Unable to create flight arc shader.');
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        const message = gl.getShaderInfoLog(shader) ?? 'Unknown shader error';
+        gl.deleteShader(shader);
+        throw new Error(message);
+      }
+      return shader;
+    };
+
+    const buildProgram = (gl: WebGL2RenderingContext, input: CustomRenderMethodInput) => {
+      if (program) gl.deleteProgram(program);
+      const vertexShader = compileShader(gl, gl.VERTEX_SHADER, `#version 300 es
+        precision highp float;
+        ${input.shaderData.vertexShaderPrelude}
+        ${input.shaderData.define}
+        in vec3 a_position;
+        in vec3 a_previous;
+        in vec3 a_next;
+        in float a_side;
+        in float a_lane;
+        uniform vec2 u_viewport;
+        uniform float u_width;
+        uniform float u_pixel_ratio;
+        void main() {
+          vec4 current = projectTileFor3D(a_position.xy, a_position.z);
+          vec4 previous = projectTileFor3D(a_previous.xy, a_previous.z);
+          vec4 next = projectTileFor3D(a_next.xy, a_next.z);
+          vec2 currentScreen = current.xy / current.w;
+          vec2 incomingDelta = (currentScreen - previous.xy / previous.w) * u_viewport;
+          vec2 outgoingDelta = (next.xy / next.w - currentScreen) * u_viewport;
+          float incomingLength = length(incomingDelta);
+          float outgoingLength = length(outgoingDelta);
+          vec2 incoming = incomingLength > 0.001 ? incomingDelta / incomingLength : outgoingDelta / max(outgoingLength, 0.001);
+          vec2 outgoing = outgoingLength > 0.001 ? outgoingDelta / outgoingLength : incoming;
+          vec2 tangentSum = incoming + outgoing;
+          vec2 tangent = length(tangentSum) > 0.001 ? normalize(tangentSum) : outgoing;
+          vec2 miter = vec2(-tangent.y, tangent.x);
+          vec2 outgoingNormal = vec2(-outgoing.y, outgoing.x);
+          float miterScale = min(2.4, 1.0 / max(abs(dot(miter, outgoingNormal)), 0.01));
+          float offset = (a_side * u_width + a_lane) * u_pixel_ratio * miterScale;
+          current.xy += miter * offset * 2.0 / u_viewport * current.w;
+          gl_Position = current;
+        }
+      `);
+      const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, `#version 300 es
+        precision mediump float;
+        uniform vec4 u_color;
+        out vec4 fragColor;
+        void main() { fragColor = u_color; }
+      `);
+      const nextProgram = gl.createProgram();
+      if (!nextProgram) throw new Error('Unable to create flight arc program.');
+      gl.attachShader(nextProgram, vertexShader);
+      gl.attachShader(nextProgram, fragmentShader);
+      gl.linkProgram(nextProgram);
+      gl.deleteShader(vertexShader);
+      gl.deleteShader(fragmentShader);
+      if (!gl.getProgramParameter(nextProgram, gl.LINK_STATUS)) {
+        const message = gl.getProgramInfoLog(nextProgram) ?? 'Unknown program error';
+        gl.deleteProgram(nextProgram);
+        throw new Error(message);
+      }
+      program = nextProgram;
+      shaderVariant = input.shaderData.variantName;
+    };
+
+    return {
+      id: 'flight-arcs-3d',
+      type: 'custom',
+      renderingMode: '3d',
+      onAdd(_map, rawGl) {
+        const gl = rawGl as WebGL2RenderingContext;
+        buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, vertexData, gl.STATIC_DRAW);
+      },
+      render(rawGl, input) {
+        const gl = rawGl as WebGL2RenderingContext;
+        if (!buffer || vertexData.length === 0) return;
+        if (!program || shaderVariant !== input.shaderData.variantName) buildProgram(gl, input);
+        if (!program) return;
+
+        gl.useProgram(program);
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        const stride = 11 * Float32Array.BYTES_PER_ELEMENT;
+        const positionLocation = gl.getAttribLocation(program, 'a_position');
+        const previousLocation = gl.getAttribLocation(program, 'a_previous');
+        const nextLocation = gl.getAttribLocation(program, 'a_next');
+        const sideLocation = gl.getAttribLocation(program, 'a_side');
+        const laneLocation = gl.getAttribLocation(program, 'a_lane');
+        gl.enableVertexAttribArray(positionLocation);
+        gl.enableVertexAttribArray(previousLocation);
+        gl.enableVertexAttribArray(nextLocation);
+        gl.enableVertexAttribArray(sideLocation);
+        gl.enableVertexAttribArray(laneLocation);
+        gl.vertexAttribPointer(positionLocation, 3, gl.FLOAT, false, stride, 0);
+        gl.vertexAttribPointer(previousLocation, 3, gl.FLOAT, false, stride, 3 * Float32Array.BYTES_PER_ELEMENT);
+        gl.vertexAttribPointer(nextLocation, 3, gl.FLOAT, false, stride, 6 * Float32Array.BYTES_PER_ELEMENT);
+        gl.vertexAttribPointer(sideLocation, 1, gl.FLOAT, false, stride, 9 * Float32Array.BYTES_PER_ELEMENT);
+        gl.vertexAttribPointer(laneLocation, 1, gl.FLOAT, false, stride, 10 * Float32Array.BYTES_PER_ELEMENT);
+
+        const projection = input.defaultProjectionData;
+        gl.uniformMatrix4fv(gl.getUniformLocation(program, 'u_projection_matrix'), false, projection.mainMatrix);
+        gl.uniform4fv(gl.getUniformLocation(program, 'u_projection_tile_mercator_coords'), projection.tileMercatorCoords);
+        gl.uniform4fv(gl.getUniformLocation(program, 'u_projection_clipping_plane'), projection.clippingPlane);
+        gl.uniform1f(gl.getUniformLocation(program, 'u_projection_transition'), projection.projectionTransition);
+        gl.uniformMatrix4fv(gl.getUniformLocation(program, 'u_projection_fallback_matrix'), false, projection.fallbackMatrix);
+        gl.uniform2f(gl.getUniformLocation(program, 'u_viewport'), gl.drawingBufferWidth, gl.drawingBufferHeight);
+        gl.uniform1f(gl.getUniformLocation(program, 'u_pixel_ratio'), window.devicePixelRatio || 1);
+
+        gl.enable(gl.BLEND);
+        gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        gl.depthMask(false);
+        const draw = (width: number, color: [number, number, number, number]) => {
+          gl.uniform1f(gl.getUniformLocation(program!, 'u_width'), width);
+          gl.uniform4fv(gl.getUniformLocation(program!, 'u_color'), color);
+          gl.drawArrays(gl.TRIANGLES, 0, vertexData.length / 11);
+        };
+        draw(2.4, dark ? [.2, .64, .92, .1] : [.05, .37, .65, .07]);
+        draw(.72, dark ? [.5, .82, 1, .88] : [.03, .32, .57, .78]);
+        gl.depthMask(true);
+      },
+      onRemove(_map, rawGl) {
+        const gl = rawGl as WebGL2RenderingContext;
+        if (buffer) gl.deleteBuffer(buffer);
+        if (program) gl.deleteProgram(program);
+        buffer = null;
+        program = null;
+      },
+    };
   }
 
   function centerOf(points: RoutePoint[]): [number, number] {
@@ -131,16 +318,19 @@ const routes = flights.map((flight) => ({
     const compact = root.dataset.compact === 'true';
     const airports = routes.flatMap((route) => [route.from, route.to]);
     const overviewCenter = centerOf(airports);
-    const overviewZoom = compact ? 1.65 : (canvas.clientWidth < 620 ? .55 : 1.2);
+    const overviewZoomForWidth = () => compact
+      ? 1.65
+      : (canvas.clientWidth < 620 ? .72 : Math.min(2.35, 1.5 + Math.log2(canvas.clientWidth / 700)));
+    const overviewZoom = overviewZoomForWidth();
     const map = new maplibregl.Map({
       container: canvas,
       style: `https://tiles.openfreemap.org/styles/${dark ? 'dark' : 'positron'}`,
       center: overviewCenter,
-      zoom: overviewZoom,
+      zoom: overviewZoomForWidth(),
       cooperativeGestures: true,
       renderWorldCopies: false,
     });
-    map.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: false }), 'top-right');
+    map.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: true }), 'top-right');
 
     const showGlobe = () => map.easeTo({
       center: overviewCenter,
@@ -163,10 +353,19 @@ const routes = flights.map((flight) => ({
       map.resize();
     });
 
-    const routeFeatures = groupRoutes(routes).map((route) => ({
+    const groupedRoutes = groupRoutes(routes);
+    const routeArcs = groupedRoutes.map((route) => elevatedArc(route.from, route.to, curveDirection(route.pairKey)));
+    const visualArcs = groupedRoutes.flatMap((route) => {
+      const offsets = bundleOffsets(route.count);
+      return offsets.map((offset) => ({
+        points: elevatedArc(route.from, route.to, curveDirection(route.pairKey), 1 + offset * .018),
+        offset,
+      }));
+    });
+    const routeFeatures = groupedRoutes.map((route, index) => ({
       type: 'Feature' as const,
-      properties: { count: route.count, title: `${route.from.code} ↔ ${route.to.code} · ${route.count} 次航班` },
-      geometry: { type: 'LineString' as const, coordinates: curvedArc(route.from, route.to, curveDirection(route.key)) },
+      properties: { count: route.count, title: `${route.from.code} → ${route.to.code} · ${route.count} 次航班` },
+      geometry: { type: 'LineString' as const, coordinates: routeArcs[index].map(([lng, lat]) => [lng, lat]) },
     }));
     const airportMap = new Map<string, RoutePoint>();
     const airportVisits = new Map<string, number>();
@@ -207,30 +406,8 @@ const routes = flights.map((flight) => ({
         initialViewApplied = true;
         map.jumpTo({ center: overviewCenter, zoom: overviewZoom, bearing: 0, pitch: 0 });
       }
+      map.addLayer(createArcLayer(visualArcs, dark));
       map.addSource('flight-routes', { type: 'geojson', lineMetrics: true, data: { type: 'FeatureCollection', features: routeFeatures } });
-      map.addLayer({
-        id: 'flight-routes-glow',
-        type: 'line',
-        source: 'flight-routes',
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: {
-          'line-color': dark ? '#69bcf2' : '#2877aa',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 0, 5, 5, 8, 10, 11],
-          'line-blur': ['interpolate', ['linear'], ['zoom'], 0, 2, 8, 4],
-          'line-opacity': dark ? .24 : .14,
-        },
-      });
-      map.addLayer({
-        id: 'flight-routes',
-        type: 'line',
-        source: 'flight-routes',
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: {
-          'line-color': dark ? '#9bd8ff' : '#176b9e',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 0, 1.5, 4, 2.1, 10, 2.8],
-          'line-opacity': dark ? .78 : .68,
-        },
-      });
       map.addLayer({
         id: 'flight-routes-hit',
         type: 'line',
