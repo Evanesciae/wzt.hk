@@ -6,7 +6,7 @@ interface Props { photos: CityPhoto[] }
 const { photos } = Astro.props;
 const prepared = photos.map((photo) => {
   const variants = [...photo.variants].sort((a, b) => a.width - b.width);
-  return { ...photo, thumb: variants[Math.min(1, variants.length - 1)], full: variants.at(-1), variants };
+  return { ...photo, thumb: variants[0], full: variants.at(-1) };
 });
 const photoItems = prepared.map((photo) => ({
   src: photo.full ? mediaUrl(photo.full.path, photo.id) : '',
@@ -25,8 +25,6 @@ const photoItems = prepared.map((photo) => ({
     >
       {photo.thumb && <img
         src={mediaUrl(photo.thumb.path, photo.id)}
-        srcset={photo.variants.map((variant) => `${mediaUrl(variant.path, photo.id)} ${variant.width}w`).join(', ')}
-        sizes="(max-width: 600px) 50vw, 30vw"
         alt={photo.alt}
         loading="lazy"
         decoding="async"
