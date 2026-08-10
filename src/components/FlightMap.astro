@@ -1,7 +1,6 @@
 ---
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Flight } from '../server/types';
-import { formatFlightDate } from '../lib/content';
 
 interface Props {
   flights: Flight[];
@@ -10,8 +9,6 @@ interface Props {
 
 const { flights, compact = false } = Astro.props;
 const routes = flights.map((flight) => ({
-  id: flight.id,
-  title: `${formatFlightDate(flight.date, flight.datePrecision)} · ${flight.flightNumber || '航班待确认'} · ${flight.fromAirport.code} → ${flight.toAirport.code}`,
   from: { code: flight.fromAirport.code, city: flight.fromAirport.city, lat: flight.fromAirport.lat, lng: flight.fromAirport.lng },
   to: { code: flight.toAirport.code, city: flight.toAirport.city, lat: flight.toAirport.lat, lng: flight.toAirport.lng },
 })).filter((route) => Number.isFinite(route.from.lat) && Number.isFinite(route.from.lng)
@@ -31,7 +28,8 @@ const routes = flights.map((flight) => ({
 
 <script>
   interface RoutePoint { code: string; city: string; lat: number; lng: number }
-  interface Route { id: string; title: string; from: RoutePoint; to: RoutePoint }
+  interface Route { from: RoutePoint; to: RoutePoint }
+  interface RouteGroup { key: string; from: RoutePoint; to: RoutePoint; count: number }
 
   type Vector3 = [number, number, number];
 
@@ -42,12 +40,23 @@ const routes = flights.map((flight) => ({
     return [radius * Math.cos(longitude), radius * Math.sin(longitude), Math.sin(latitude)];
   }
 
-  function greatCircle(from: RoutePoint, to: RoutePoint): [number, number][] {
+  function normalize(vector: Vector3): Vector3 {
+    const magnitude = Math.hypot(...vector);
+    return magnitude < 1e-8 ? [0, 0, 0] : vector.map((value) => value / magnitude) as Vector3;
+  }
+
+  function cross(a: Vector3, b: Vector3): Vector3 {
+    return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  }
+
+  function curvedArc(from: RoutePoint, to: RoutePoint, direction: number): [number, number][] {
     const start = toVector(from);
     const end = toVector(to);
     const dot = Math.min(1, Math.max(-1, start[0] * end[0] + start[1] * end[1] + start[2] * end[2]));
     const angle = Math.acos(dot);
     const denominator = Math.sin(angle);
+    const normal = normalize(cross(start, end));
+    const bend = direction * Math.min(Math.max(angle * .28, .025), .11);
     const steps = Math.max(40, Math.ceil(angle * 48));
     const coordinates: [number, number][] = [];
     let previousLongitude = from.lng;
@@ -56,9 +65,17 @@ const routes = flights.map((flight) => ({
       const t = index / steps;
       const startWeight = denominator < 1e-6 ? 1 - t : Math.sin((1 - t) * angle) / denominator;
       const endWeight = denominator < 1e-6 ? t : Math.sin(t * angle) / denominator;
-      const x = startWeight * start[0] + endWeight * end[0];
-      const y = startWeight * start[1] + endWeight * end[1];
-      const z = startWeight * start[2] + endWeight * end[2];
+      const base = normalize([
+        startWeight * start[0] + endWeight * end[0],
+        startWeight * start[1] + endWeight * end[1],
+        startWeight * start[2] + endWeight * end[2],
+      ]);
+      const offset = Math.sin(Math.PI * t) * bend;
+      const [x, y, z] = normalize([
+        base[0] * Math.cos(offset) + normal[0] * Math.sin(offset),
+        base[1] * Math.cos(offset) + normal[1] * Math.sin(offset),
+        base[2] * Math.cos(offset) + normal[2] * Math.sin(offset),
+      ]);
       let longitude = Math.atan2(y, x) * 180 / Math.PI;
       const latitude = Math.atan2(z, Math.sqrt(x * x + y * y)) * 180 / Math.PI;
 
@@ -68,6 +85,24 @@ const routes = flights.map((flight) => ({
       previousLongitude = longitude;
     }
     return coordinates;
+  }
+
+  function groupRoutes(routes: Route[]): RouteGroup[] {
+    const groups = new Map<string, RouteGroup>();
+    routes.forEach((route) => {
+      const ordered = route.from.code.localeCompare(route.to.code) <= 0
+        ? [route.from, route.to]
+        : [route.to, route.from];
+      const key = `${ordered[0].code}-${ordered[1].code}`;
+      const existing = groups.get(key);
+      if (existing) existing.count += 1;
+      else groups.set(key, { key, from: ordered[0], to: ordered[1], count: 1 });
+    });
+    return [...groups.values()];
+  }
+
+  function curveDirection(key: string) {
+    return [...key].reduce((hash, character) => hash + character.charCodeAt(0), 0) % 2 === 0 ? 1 : -1;
   }
 
   function centerOf(points: RoutePoint[]): [number, number] {
@@ -128,10 +163,10 @@ const routes = flights.map((flight) => ({
       map.resize();
     });
 
-    const routeFeatures = routes.map((route) => ({
+    const routeFeatures = groupRoutes(routes).map((route) => ({
       type: 'Feature' as const,
-      properties: { title: route.title },
-      geometry: { type: 'LineString' as const, coordinates: greatCircle(route.from, route.to) },
+      properties: { count: route.count, title: `${route.from.code} ↔ ${route.to.code} · ${route.count} 次航班` },
+      geometry: { type: 'LineString' as const, coordinates: curvedArc(route.from, route.to, curveDirection(route.key)) },
     }));
     const airportMap = new Map<string, RoutePoint>();
     const airportVisits = new Map<string, number>();
@@ -180,7 +215,7 @@ const routes = flights.map((flight) => ({
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
           'line-color': dark ? '#69bcf2' : '#2877aa',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 0, 3.5, 5, 7, 10, 10],
+          'line-width': ['interpolate', ['linear'], ['zoom'], 0, 5, 5, 8, 10, 11],
           'line-blur': ['interpolate', ['linear'], ['zoom'], 0, 2, 8, 4],
           'line-opacity': dark ? .24 : .14,
         },
@@ -192,7 +227,7 @@ const routes = flights.map((flight) => ({
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
           'line-color': dark ? '#9bd8ff' : '#176b9e',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 0, .8, 4, 1.45, 10, 2.2],
+          'line-width': ['interpolate', ['linear'], ['zoom'], 0, 1.5, 4, 2.1, 10, 2.8],
           'line-opacity': dark ? .78 : .68,
         },
       });

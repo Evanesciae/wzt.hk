@@ -31,10 +31,13 @@ const adminSession = Astro.locals.adminSession;
     <meta name="theme-color" content="#ffffff" />
     <script is:inline>
       (() => {
-        const saved = localStorage.getItem('site-theme');
-        const theme = saved === 'light' || saved === 'dark'
-          ? saved
-          : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        const savedMode = localStorage.getItem('site-theme-mode');
+        const mode = savedMode === 'light' || savedMode === 'dark' ? savedMode : 'auto';
+        const theme = mode === 'auto'
+          ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+          : mode;
+        localStorage.removeItem('site-theme');
+        document.documentElement.dataset.themeMode = mode;
         document.documentElement.dataset.theme = theme;
       })();
     </script>
@@ -62,8 +65,8 @@ const adminSession = Astro.locals.adminSession;
               </a>
             );
           })}
-          <button class="theme-toggle" type="button" data-theme-toggle aria-label="切换为深色模式" title="切换显示模式">
-            <span aria-hidden="true" data-theme-icon>◐</span>
+          <button class="theme-toggle" type="button" data-theme-toggle aria-label="显示模式：自动" title="切换显示模式">
+            <span aria-hidden="true" data-theme-icon>A</span>
           </button>
         </nav>
       </div>
@@ -82,19 +85,49 @@ const adminSession = Astro.locals.adminSession;
     <script>
       const root = document.documentElement;
       const toggle = document.querySelector<HTMLButtonElement>('[data-theme-toggle]');
+      const icon = toggle?.querySelector<HTMLElement>('[data-theme-icon]');
       const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+      const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
+
+      type Theme = 'light' | 'dark';
+      type ThemeMode = Theme | 'auto';
+
+      function currentMode(): ThemeMode {
+        return root.dataset.themeMode === 'light' || root.dataset.themeMode === 'dark'
+          ? root.dataset.themeMode
+          : 'auto';
+      }
+
+      function resolvedTheme(mode: ThemeMode): Theme {
+        return mode === 'auto' ? (systemTheme.matches ? 'dark' : 'light') : mode;
+      }
+
       function syncThemeControl() {
         const dark = root.dataset.theme === 'dark';
-        if (toggle) toggle.setAttribute('aria-label', dark ? '切换为浅色模式' : '切换为深色模式');
+        const mode = currentMode();
+        const label = mode === 'auto' ? '自动' : mode === 'light' ? '浅色' : '深色';
+        if (toggle) toggle.setAttribute('aria-label', `显示模式：${label}，点击切换`);
+        if (icon) icon.textContent = mode === 'auto' ? 'A' : mode === 'light' ? '☀' : '☾';
         if (meta) meta.content = dark ? '#191919' : '#ffffff';
       }
+
+      function applyThemeMode(mode: ThemeMode, persist = true) {
+        const previousTheme = root.dataset.theme;
+        const theme = resolvedTheme(mode);
+        root.dataset.themeMode = mode;
+        root.dataset.theme = theme;
+        if (persist) localStorage.setItem('site-theme-mode', mode);
+        syncThemeControl();
+        if (theme !== previousTheme) document.dispatchEvent(new CustomEvent('site-theme-change', { detail: theme }));
+      }
+
       syncThemeControl();
       toggle?.addEventListener('click', () => {
-        const theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
-        root.dataset.theme = theme;
-        localStorage.setItem('site-theme', theme);
-        syncThemeControl();
-        document.dispatchEvent(new CustomEvent('site-theme-change', { detail: theme }));
+        const modes: ThemeMode[] = ['auto', 'light', 'dark'];
+        applyThemeMode(modes[(modes.indexOf(currentMode()) + 1) % modes.length]);
+      });
+      systemTheme.addEventListener('change', () => {
+        if (currentMode() === 'auto') applyThemeMode('auto', false);
       });
     </script>
   </body>
