@@ -24,7 +24,8 @@ function contentHeaders(object: R2ObjectBody, path: string) {
 }
 
 async function transformImage(bindings: Bindings, originalPath: string, width: number) {
-  const original = await bindings.MEDIA.get(`originals/${originalPath}`);
+  const key = `originals/${originalPath}`;
+  const original = await bindings.MEDIA.get(key);
   if (!original) return null;
   try {
     const result = await bindings.IMAGES
@@ -36,7 +37,12 @@ async function transformImage(bindings: Bindings, originalPath: string, width: n
     headers.set('cache-control', 'public, max-age=31536000, immutable');
     return new Response(response.body, { status: response.status, headers });
   } catch {
-    return new Response('Unsupported image', { status: 415 });
+    // Some legacy originals exceed the Images binding input limit. They are
+    // still browser-compatible, so return the source instead of a broken image.
+    const fallback = await bindings.MEDIA.get(key);
+    return fallback
+      ? new Response(fallback.body, { headers: contentHeaders(fallback, originalPath) })
+      : null;
   }
 }
 
