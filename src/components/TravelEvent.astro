@@ -71,10 +71,12 @@ const photoItems = preparedPhotos.map((photo) => ({
     {preparedPhotos.length > 0 && (
       <div class="event-photo-album" data-photo-gallery data-photo-items={JSON.stringify(photoItems)}>
         <div class="event-photos" aria-label={`${event.title}照片预览`}>
-          {preparedPhotos.slice(0, 8).map((photo, index) => (
+          {preparedPhotos.map((photo, index) => (
           <button
             type="button"
             data-photo-index={index}
+            data-event-photo-extra={index >= 8 ? '' : undefined}
+            hidden={index >= 8}
             aria-label={`查看照片：${photo.alt}`}
           >
             {photo.thumb && <img
@@ -82,10 +84,18 @@ const photoItems = preparedPhotos.map((photo) => ({
               srcset={photo.variants.map((variant) => `${mediaUrl(variant.path, photo.id)} ${variant.width}w`).join(', ')}
               sizes="160px" alt={photo.alt} loading="lazy" decoding="async"
             />}
-            {index === 7 && preparedPhotos.length > 8 && <span>+{preparedPhotos.length - 8}</span>}
           </button>
           ))}
         </div>
+        {preparedPhotos.length > 8 && (
+          <button
+            class="event-photo-expand"
+            type="button"
+            data-event-photo-expand
+            data-collapsed-label={`展开其余 ${preparedPhotos.length - 8} 张`}
+            aria-expanded="false"
+          >展开其余 {preparedPhotos.length - 8} 张</button>
+        )}
         <dialog class="photo-dialog" data-photo-dialog>
           <button type="button" class="dialog-close" data-dialog-close aria-label="关闭照片">×</button>
           <div class="photo-dialog-stage">
@@ -103,6 +113,17 @@ const photoItems = preparedPhotos.map((photo) => ({
 <script>
   import { setupPhotoLightboxes } from '../lib/photo-lightbox';
   setupPhotoLightboxes();
+  document.querySelectorAll<HTMLButtonElement>('[data-event-photo-expand]:not([data-ready])').forEach((button) => {
+    button.dataset.ready = 'true';
+    button.addEventListener('click', () => {
+      const album = button.closest<HTMLElement>('[data-photo-gallery]');
+      if (!album) return;
+      const expanded = button.getAttribute('aria-expanded') === 'true';
+      album.querySelectorAll<HTMLElement>('[data-event-photo-extra]').forEach((photo) => { photo.hidden = expanded; });
+      button.setAttribute('aria-expanded', String(!expanded));
+      button.textContent = expanded ? (button.dataset.collapsedLabel ?? '展开全部') : '收起照片';
+    });
+  });
   document.querySelectorAll<HTMLButtonElement>('[data-event-map]:not([data-ready])').forEach((button) => {
     button.dataset.ready = 'true';
     button.addEventListener('click', () => document.dispatchEvent(new CustomEvent('travel-map-focus', { detail: {

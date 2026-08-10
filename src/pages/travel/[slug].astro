@@ -3,7 +3,6 @@ import { marked } from 'marked';
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import TravelEvent from '../../components/TravelEvent.astro';
 import TravelMap from '../../components/TravelMap.astro';
-import PhotoGallery from '../../components/PhotoGallery.astro';
 import { formatDate, formatDateRange, travelStatus } from '../../lib/content';
 import { getTrip } from '../../server/database';
 import { getSession } from '../../server/auth';
@@ -40,16 +39,6 @@ const mapDays = days.map((day, dayIndex) => ({
   }),
 }));
 
-const photos = days.flatMap((day, dayIndex) => day.events.flatMap((event) => event.photos.map((photo) => ({
-  ...photo, dateLabel: dayLabel(day, dayIndex), eventTitle: event.title,
-}))));
-const photoDays = days.map((day, dayIndex) => ({
-  day,
-  dayIndex,
-  photos: day.events.flatMap((event) => event.photos.map((photo) => ({
-    ...photo, dateLabel: dayLabel(day, dayIndex), eventTitle: event.title,
-  }))),
-})).filter((group) => group.photos.length > 0);
 ---
 
 <BaseLayout title={entry.title} description={entry.summary}>
@@ -73,7 +62,6 @@ const photoDays = days.map((day, dayIndex) => ({
 
     <nav class="trip-section-nav" aria-label="行程内容">
       <a href="#timeline">每日行程</a><a href="#overview">整体信息</a>
-      {photos.length > 0 && <a href="#trip-album">行程相册 <span>{photos.length}</span></a>}
     </nav>
 
     <nav class="trip-day-jump" aria-label="快速跳转到日期">
@@ -83,7 +71,6 @@ const photoDays = days.map((day, dayIndex) => ({
     <div class="trip-mobile-tabs" aria-label="手机端行程视图">
       <button type="button" data-mobile-target="timeline">行程</button>
       <button type="button" data-mobile-map-open>地图</button>
-      {photos.length > 0 && <button type="button" data-mobile-target="trip-album">相册</button>}
     </div>
 
     {entry.pendingItems.length > 0 && <aside class="pending-panel"><h2>出发前待确认</h2><ul>{entry.pendingItems.map((item) => <li>{item}</li>)}</ul></aside>}
@@ -102,9 +89,6 @@ const photoDays = days.map((day, dayIndex) => ({
                 <h2>{day.title ?? day.city}</h2>{day.title && <p>{day.city}</p>}
               </div>
               <div class="day-actions">
-                {day.events.some((event) => event.photos.length > 0) && (
-                  <a class="day-photo-link" href={`#album-${day.id}`}>本日 {day.events.reduce((total, event) => total + event.photos.length, 0)} 张照片 ↓</a>
-                )}
                 <button type="button" class="day-toggle" data-day-toggle aria-expanded="true" aria-controls={`day-panel-${day.id}`}>
                   <span data-day-toggle-label>收起</span><span aria-hidden="true">⌄</span>
                 </button>
@@ -122,21 +106,6 @@ const photoDays = days.map((day, dayIndex) => ({
     {overviewHtml && <section class="trip-overview" id="overview">
       <div class="section-heading trip-section-heading"><div><p class="eyebrow">DETAILS</p><h2>整体信息</h2></div></div>
       <article class="prose" set:html={overviewHtml} />
-    </section>}
-
-    {photos.length > 0 && <section class="trip-album" id="trip-album">
-      <div class="section-heading trip-section-heading"><div><p class="eyebrow">PHOTOS</p><h2>行程相册</h2></div><span>{photos.length} 张</span></div>
-      <div class="album-days">{photoDays.map(({ day, dayIndex, photos: dayPhotos }) => (
-        <section class="album-day" id={`album-${day.id}`}>
-          <header>
-            {entry.datesTbd || !day.date
-              ? <span class="day-date-tbd">Day {dayIndex + 1}</span>
-              : <time>{formatDate(date(day.date), { year: 'numeric', month: 'long', day: 'numeric' })}</time>}
-            <h3>{day.title ?? day.city}</h3><span>{dayPhotos.length} 张</span>
-          </header>
-          <PhotoGallery photos={dayPhotos} />
-        </section>
-      ))}</div>
     </section>}
   </div>
 </BaseLayout>
