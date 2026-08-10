@@ -11,7 +11,7 @@ const trips = await listTrips(true);
       <div>
         <p class="eyebrow">ADMIN</p>
         <h1>管理中心</h1>
-        <p class="admin-heading-description">集中管理网站内容、旅行记录和地点资料。</p>
+        <p class="admin-heading-description">集中管理网站内容和旅行记录。</p>
       </div>
       <div class="admin-heading-actions">
         <button type="button" class="primary-button admin-primary-action" data-new-trip>新建行程</button>
@@ -23,11 +23,6 @@ const trips = await listTrips(true);
       <a class="admin-module-card" href="/admin/kb">
         <span class="admin-module-icon" aria-hidden="true">文</span>
         <span><strong>知识库</strong><small>撰写与整理知识笔记</small></span>
-        <span class="admin-module-arrow" aria-hidden="true">→</span>
-      </a>
-      <a class="admin-module-card" href="/admin/cities">
-        <span class="admin-module-icon" aria-hidden="true">城</span>
-        <span><strong>城市地点</strong><small>维护地点、坐标与照片</small></span>
         <span class="admin-module-arrow" aria-hidden="true">→</span>
       </a>
       <a class="admin-module-card" href="/admin/flights">
