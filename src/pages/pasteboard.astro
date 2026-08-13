@@ -6,6 +6,10 @@ import BaseLayout from '../layouts/BaseLayout.astro';
   <div class="container pasteboard-shell">
     <header class="pasteboard-header">
       <h1>粘贴板</h1>
+      <nav class="page-switch" aria-label="页面切换">
+        <a href="/pasteboard" aria-current="page">粘贴板</a>
+        <a href="/bookmarks">书签</a>
+      </nav>
     </header>
 
     <section class="composer" aria-label="添加内容">
@@ -75,8 +79,10 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       const skeleton = document.querySelector<HTMLElement>('[data-skeleton]')!;
       const toast = document.querySelector<HTMLElement>('[data-toast]')!;
       const channelEvents = 'BroadcastChannel' in window ? new BroadcastChannel('wzt-pasteboard') : null;
+      const bookmarkEvents = 'BroadcastChannel' in window ? new BroadcastChannel('wzt-bookmarks') : null;
 
       let items: PasteItem[] = [];
+      let bookmarkedUrls = new Set<string>();
       let channel = '';
       let loaded = false;
       let syncing = false;
@@ -117,6 +123,20 @@ import BaseLayout from '../layouts/BaseLayout.astro';
         } catch { /* Plain text is expected most of the time. */ }
         if (/\n/.test(content) && /[{}();=>]|^\s{2,}|\b(const|let|function|class|SELECT|FROM|import)\b/m.test(content)) return 'code';
         return 'text';
+      }
+
+      function bookmarkUrl(content: string) {
+        const value = content.trim();
+        if (!value || /\s/.test(value)) return undefined;
+        const candidate = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+        try {
+          const url = new URL(candidate);
+          if (!['http:', 'https:'].includes(url.protocol) || !url.hostname.includes('.')) return undefined;
+          url.hash = '';
+          return url.toString();
+        } catch {
+          return undefined;
+        }
       }
 
       function typeLabel(type: PasteType) {
@@ -186,6 +206,17 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           download.textContent = '下载';
           actions.append(download);
         } else {
+          const url = bookmarkUrl(item.content);
+          if (url) {
+            const save = document.createElement('button');
+            const saved = bookmarkedUrls.has(url);
+            save.type = 'button';
+            save.className = 'bookmark-button';
+            save.disabled = saved;
+            save.innerHTML = `<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.5 4.5A1.5 1.5 0 0 1 7 3h6a1.5 1.5 0 0 1 1.5 1.5V17L10 14l-4.5 3V4.5Z" /></svg><span>${saved ? '已保存' : '保存'}</span>`;
+            save.addEventListener('click', () => saveBookmark(url, save));
+            actions.append(save);
+          }
           const copy = document.createElement('button');
           copy.type = 'button';
           copy.className = 'copy-button';
@@ -253,6 +284,40 @@ import BaseLayout from '../layouts/BaseLayout.astro';
         list.querySelectorAll<HTMLTimeElement>('time').forEach((time) => {
           time.textContent = formatTime(time.dateTime);
         });
+      }
+
+      async function syncBookmarkUrls() {
+        if (!channel) return;
+        try {
+          const response = await fetch(`/api/bookmarks?channel=${channel}`, { cache: 'no-store' });
+          if (!response.ok) return;
+          const data = await response.json();
+          const nextUrls = new Set<string>(data.bookmarks.map((bookmark: { url: string }) => bookmark.url));
+          const changed = JSON.stringify([...nextUrls].sort()) !== JSON.stringify([...bookmarkedUrls].sort());
+          bookmarkedUrls = nextUrls;
+          if (changed && loaded) render();
+        } catch { /* The pasteboard still works when bookmark syncing is unavailable. */ }
+      }
+
+      async function saveBookmark(url: string, button: HTMLButtonElement) {
+        button.disabled = true;
+        button.querySelector('span')!.textContent = '保存中';
+        try {
+          const response = await fetch('/api/bookmarks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channel, url }),
+          });
+          if (!response.ok) throw new Error('save failed');
+          bookmarkedUrls.add(url);
+          button.querySelector('span')!.textContent = '已保存';
+          bookmarkEvents?.postMessage('refresh');
+          showToast('已保存到书签');
+        } catch {
+          button.disabled = false;
+          button.querySelector('span')!.textContent = '保存';
+          showToast('保存失败，请稍后再试');
+        }
       }
 
       async function syncItems(silent = false) {
@@ -385,6 +450,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       });
 
       channelEvents?.addEventListener('message', () => syncItems(true));
+      bookmarkEvents?.addEventListener('message', () => syncBookmarkUrls());
       window.addEventListener('online', () => syncItems());
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') syncItems(true);
@@ -395,8 +461,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
         if (location.hash) history.replaceState(null, '', `${location.pathname}${location.search}`);
         readCache();
         if (items.length) render();
-        await syncItems(true);
+        await Promise.all([syncItems(true), syncBookmarkUrls()]);
         window.setInterval(() => syncItems(true), 5000);
+        window.setInterval(() => syncBookmarkUrls(), 5000);
       }
       start();
   </script>
@@ -419,6 +486,10 @@ import BaseLayout from '../layouts/BaseLayout.astro';
   .pasteboard-shell { max-width: 900px; padding-top: 72px; }
 
   .pasteboard-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
     margin-bottom: 34px;
   }
 
@@ -429,6 +500,11 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     letter-spacing: -.04em;
     line-height: 1.2;
   }
+
+  .page-switch { display: flex; gap: 4px; padding: 3px; border-radius: 7px; background: var(--bg-soft); }
+  .page-switch a { padding: 5px 10px; border-radius: 5px; color: var(--text-3); font-size: 12px; }
+  .page-switch a:hover { color: var(--text); }
+  .page-switch a[aria-current='page'] { background: var(--bg); color: var(--text); box-shadow: 0 0 0 1px var(--line); }
 
   .composer {
     position: static;
@@ -516,13 +592,14 @@ import BaseLayout from '../layouts/BaseLayout.astro';
   :global(.type-badge) { padding: 2px 6px; border-radius: 4px; background: var(--bg-soft); color: var(--text-2); font: 11px/1.5 var(--font-sans); letter-spacing: 0; }
   :global(.type-link) { background: var(--accent-soft); color: var(--accent); }
   :global(.type-code), :global(.type-json) { background: var(--private-bg); color: var(--private-text); }
-  :global(.copy-button), :global(.download-button), :global(.delete-button) { height: 30px; border: 0; border-radius: 5px; background: transparent; color: var(--text-3); cursor: pointer; }
-  :global(.copy-button) { display: flex; align-items: center; gap: 6px; padding: 0 8px; font-size: 12px; }
+  :global(.copy-button), :global(.bookmark-button), :global(.download-button), :global(.delete-button) { height: 30px; border: 0; border-radius: 5px; background: transparent; color: var(--text-3); cursor: pointer; }
+  :global(.copy-button), :global(.bookmark-button) { display: flex; align-items: center; gap: 6px; padding: 0 8px; font-size: 12px; }
   :global(.download-button) { display: inline-flex; align-items: center; padding: 0 8px; font-size: 12px; }
   :global(.delete-button) { display: grid; width: 30px; padding: 0; place-items: center; }
-  :global(.copy-button:hover), :global(.download-button:hover), :global(.delete-button:hover) { background: var(--bg-soft); color: var(--text); }
+  :global(.copy-button:hover), :global(.bookmark-button:hover:not(:disabled)), :global(.download-button:hover), :global(.delete-button:hover) { background: var(--bg-soft); color: var(--text); }
+  :global(.bookmark-button:disabled) { color: var(--accent); cursor: default; }
   :global(.copy-button.is-copied) { color: var(--accent); }
-  :global(.copy-button svg), :global(.delete-button svg) { width: 15px; height: 15px; }
+  :global(.copy-button svg), :global(.bookmark-button svg), :global(.delete-button svg) { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
   :global(.card-content) { margin: 0; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.65; }
   :global(.link-content) { display: block; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
   :global(.file-content) { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; color: var(--text); }
@@ -545,6 +622,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 
   @media (max-width: 620px) {
     .pasteboard-shell { padding-top: 44px; }
+    .pasteboard-header { align-items: center; }
     .composer { padding: 16px; }
     .composer-actions { align-items: stretch; flex-direction: column; }
     .composer-actions > div { justify-content: flex-end; }
@@ -553,5 +631,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     :global(.paste-card) { padding: 15px; }
     :global(.copy-button span) { display: none; }
     :global(.copy-button) { width: 30px; padding: 0; justify-content: center; }
+    :global(.bookmark-button span) { display: none; }
+    :global(.bookmark-button) { width: 30px; padding: 0; justify-content: center; }
   }
 </style>

@@ -1,0 +1,286 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+---
+
+<BaseLayout title="书签" description="书签" brandHref="https://wzt.hk">
+  <div class="container bookmarks-shell">
+    <header class="page-header">
+      <h1>书签</h1>
+      <nav class="page-switch" aria-label="页面切换">
+        <a href="/pasteboard">粘贴板</a>
+        <a href="/bookmarks" aria-current="page">书签</a>
+      </nav>
+    </header>
+
+    <form class="composer" data-bookmark-form>
+      <div class="field">
+        <label for="bookmark-url">网址</label>
+        <input id="bookmark-url" name="url" type="text" inputmode="url" placeholder="example.com" required autocomplete="url" />
+      </div>
+      <div class="field">
+        <label for="bookmark-title">标题 <span>可选</span></label>
+        <input id="bookmark-title" name="title" type="text" maxlength="160" placeholder="留空则使用域名" autocomplete="off" />
+      </div>
+      <div class="composer-actions">
+        <span>永久保存，手动删除</span>
+        <button type="submit" data-submit disabled><span data-submit-label>保存书签</span></button>
+      </div>
+    </form>
+
+    <section class="board" aria-labelledby="bookmarks-heading">
+      <div class="board-header">
+        <h2 id="bookmarks-heading">已保存</h2>
+        <span data-bookmark-count></span>
+      </div>
+      <div class="skeleton-list" data-skeleton aria-label="正在载入">
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+      </div>
+      <div class="empty-state" data-empty hidden><p>暂无书签</p></div>
+      <div class="bookmark-list" data-bookmark-list aria-live="polite"></div>
+    </section>
+  </div>
+
+  <div class="toast" data-toast role="status" aria-live="polite"></div>
+
+  <script>
+    type Bookmark = { id: string; title: string; url: string; createdAt: string };
+
+    const form = document.querySelector<HTMLFormElement>('[data-bookmark-form]')!;
+    const urlInput = document.querySelector<HTMLInputElement>('#bookmark-url')!;
+    const titleInput = document.querySelector<HTMLInputElement>('#bookmark-title')!;
+    const submit = document.querySelector<HTMLButtonElement>('[data-submit]')!;
+    const submitLabel = document.querySelector<HTMLElement>('[data-submit-label]')!;
+    const list = document.querySelector<HTMLElement>('[data-bookmark-list]')!;
+    const empty = document.querySelector<HTMLElement>('[data-empty]')!;
+    const skeleton = document.querySelector<HTMLElement>('[data-skeleton]')!;
+    const count = document.querySelector<HTMLElement>('[data-bookmark-count]')!;
+    const toast = document.querySelector<HTMLElement>('[data-toast]')!;
+    const channelEvents = 'BroadcastChannel' in window ? new BroadcastChannel('wzt-bookmarks') : null;
+
+    let bookmarks: Bookmark[] = [];
+    let channel = '';
+    let loaded = false;
+    let syncing = false;
+    let toastTimer = 0;
+
+    async function hashRoom(key: string) {
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(key));
+      return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+    }
+
+    function showToast(message: string) {
+      window.clearTimeout(toastTimer);
+      toast.textContent = message;
+      toast.classList.add('is-visible');
+      toastTimer = window.setTimeout(() => toast.classList.remove('is-visible'), 2200);
+    }
+
+    function normalizedInputUrl(value: string) {
+      const trimmed = value.trim();
+      if (!trimmed) return '';
+      return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    }
+
+    function bookmarkMeta(value: string) {
+      try {
+        const url = new URL(value);
+        const path = url.pathname === '/' ? '' : url.pathname.replace(/\/$/, '');
+        return `${url.hostname.replace(/^www\./, '')}${path}`;
+      } catch {
+        return value;
+      }
+    }
+
+    async function removeBookmark(bookmark: Bookmark, card: HTMLElement) {
+      card.classList.add('is-removing');
+      try {
+        const response = await fetch(`/api/bookmarks/${encodeURIComponent(bookmark.id)}?channel=${channel}`, { method: 'DELETE' });
+        if (!response.ok) throw new Error('delete failed');
+        bookmarks = bookmarks.filter((item) => item.id !== bookmark.id);
+        render();
+        channelEvents?.postMessage('refresh');
+        showToast('已删除');
+      } catch {
+        card.classList.remove('is-removing');
+        showToast('删除失败，请稍后再试');
+      }
+    }
+
+    function makeBookmarkCard(bookmark: Bookmark) {
+      const article = document.createElement('article');
+      article.className = 'bookmark-card';
+
+      const link = document.createElement('a');
+      link.className = 'bookmark-link';
+      link.href = bookmark.url;
+      link.target = '_blank';
+      link.rel = 'noreferrer';
+
+      const mark = document.createElement('span');
+      mark.className = 'bookmark-mark';
+      mark.textContent = bookmark.title.trim().charAt(0).toUpperCase() || '·';
+
+      const text = document.createElement('span');
+      text.className = 'bookmark-text';
+      const title = document.createElement('strong');
+      title.textContent = bookmark.title;
+      const meta = document.createElement('span');
+      meta.textContent = bookmarkMeta(bookmark.url);
+      text.append(title, meta);
+      link.append(mark, text);
+
+      const actions = document.createElement('div');
+      actions.className = 'bookmark-actions';
+      const open = document.createElement('a');
+      open.href = bookmark.url;
+      open.target = '_blank';
+      open.rel = 'noreferrer';
+      open.textContent = '打开';
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.title = '删除';
+      remove.setAttribute('aria-label', `删除书签：${bookmark.title}`);
+      remove.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h12m-7-3h2a1 1 0 0 1 1 1v2H8V4a1 1 0 0 1 1-1Zm-3 3 .7 10.1a1 1 0 0 0 1 .9h4.6a1 1 0 0 0 1-.9L14 6M8.5 9v5m3-5v5" /></svg>';
+      remove.addEventListener('click', () => removeBookmark(bookmark, article));
+      actions.append(open, remove);
+      article.append(link, actions);
+      return article;
+    }
+
+    function render() {
+      list.replaceChildren(...bookmarks.map(makeBookmarkCard));
+      skeleton.hidden = true;
+      empty.hidden = !loaded || bookmarks.length > 0;
+      count.textContent = bookmarks.length ? `${bookmarks.length} 个` : '';
+    }
+
+    async function syncBookmarks(silent = false) {
+      if (!channel || syncing) return;
+      syncing = true;
+      try {
+        const response = await fetch(`/api/bookmarks?channel=${channel}`, { cache: 'no-store' });
+        if (!response.ok) throw new Error('sync failed');
+        const data = await response.json();
+        const changed = JSON.stringify(data.bookmarks) !== JSON.stringify(bookmarks);
+        bookmarks = data.bookmarks;
+        const firstLoad = !loaded;
+        loaded = true;
+        if (changed || firstLoad) render();
+      } catch {
+        const firstLoad = !loaded;
+        loaded = true;
+        if (firstLoad) render();
+        if (!silent) showToast('同步失败，请检查网络');
+      } finally {
+        syncing = false;
+      }
+    }
+
+    function updateSubmit() {
+      submit.disabled = !urlInput.value.trim();
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const url = normalizedInputUrl(urlInput.value);
+      if (!url || submit.disabled) return;
+      submit.disabled = true;
+      submitLabel.textContent = '正在保存';
+      try {
+        const response = await fetch('/api/bookmarks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ channel, url, title: titleInput.value }),
+        });
+        if (!response.ok) throw new Error('create failed');
+        const data = await response.json();
+        bookmarks = [data.bookmark, ...bookmarks];
+        loaded = true;
+        form.reset();
+        render();
+        channelEvents?.postMessage('refresh');
+        showToast('已保存');
+        urlInput.focus();
+      } catch {
+        showToast('保存失败，请检查网址');
+      } finally {
+        submitLabel.textContent = '保存书签';
+        updateSubmit();
+      }
+    });
+
+    urlInput.addEventListener('input', updateSubmit);
+    channelEvents?.addEventListener('message', () => syncBookmarks(true));
+    window.addEventListener('online', () => syncBookmarks());
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') syncBookmarks(true);
+    });
+
+    async function start() {
+      channel = await hashRoom('wzt.hk:pasteboard:default');
+      await syncBookmarks(true);
+      window.setInterval(() => syncBookmarks(true), 5000);
+    }
+    start();
+  </script>
+</BaseLayout>
+
+<style>
+  :global(.site-nav),
+  :global(.site-footer) { display: none; }
+
+  :root { --accent: #3f6e63; }
+  .bookmarks-shell { max-width: 900px; padding-top: 72px; }
+  .page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 34px; }
+  .page-header h1 { margin: 0; font-size: clamp(32px, 5vw, 46px); font-weight: 650; letter-spacing: -.04em; line-height: 1.2; }
+  .page-switch { display: flex; gap: 4px; padding: 3px; border-radius: 7px; background: var(--bg-soft); }
+  .page-switch a { padding: 5px 10px; border-radius: 5px; color: var(--text-3); font-size: 12px; }
+  .page-switch a:hover { color: var(--text); }
+  .page-switch a[aria-current='page'] { background: var(--bg); color: var(--text); box-shadow: 0 0 0 1px var(--line); }
+
+  .composer { padding: 20px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--bg); box-shadow: var(--shadow); }
+  .field + .field { margin-top: 16px; }
+  .field label { display: block; margin-bottom: 7px; color: var(--text-2); font-size: 13px; font-weight: 600; }
+  .field label span { color: var(--text-3); font-size: 11px; font-weight: 400; }
+  .field input { width: 100%; height: 40px; padding: 0 11px; border: 1px solid var(--line); border-radius: 6px; outline: none; background: var(--bg); color: var(--text); font: 14px/1.4 var(--font-sans); }
+  .field input:focus { border-color: var(--line-strong); box-shadow: 0 0 0 2px var(--bg-soft); }
+  .field input::placeholder { color: var(--text-3); }
+  .composer-actions { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .composer-actions > span { color: var(--text-3); font-size: 11px; }
+  .composer-actions button { height: 34px; padding: 0 13px; border: 1px solid var(--text); border-radius: 6px; background: var(--text); color: var(--bg); font-size: 13px; font-weight: 550; cursor: pointer; }
+  .composer-actions button:disabled { opacity: .35; cursor: not-allowed; }
+
+  .board { padding: 64px 0 20px; }
+  .board-header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+  .board-header h2 { margin: 0; font-size: 17px; font-weight: 620; letter-spacing: -.015em; }
+  .board-header span { color: var(--text-3); font-size: 11px; }
+  .bookmark-list, .skeleton-list { display: grid; gap: 10px; padding-top: 14px; }
+  :global(.bookmark-card) { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 13px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); transition: border-color .16s ease, box-shadow .16s ease, opacity .2s, transform .2s; }
+  :global(.bookmark-card:hover) { border-color: var(--line-strong); box-shadow: var(--shadow); }
+  :global(.bookmark-card.is-removing) { opacity: 0; transform: translateX(8px); }
+  :global(.bookmark-link) { display: flex; flex: 1; align-items: center; gap: 12px; min-width: 0; color: var(--text); }
+  :global(.bookmark-mark) { display: grid; flex: 0 0 auto; width: 34px; height: 34px; place-items: center; border-radius: 7px; background: var(--bg-soft); color: var(--text-2); font-size: 13px; font-weight: 650; }
+  :global(.bookmark-text) { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+  :global(.bookmark-text strong) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 580; }
+  :global(.bookmark-text span) { overflow: hidden; color: var(--text-3); text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+  :global(.bookmark-actions) { display: flex; flex: 0 0 auto; align-items: center; gap: 3px; }
+  :global(.bookmark-actions a), :global(.bookmark-actions button) { display: grid; height: 30px; padding: 0 8px; place-items: center; border: 0; border-radius: 5px; background: transparent; color: var(--text-3); font: 12px/1 var(--font-sans); cursor: pointer; }
+  :global(.bookmark-actions button) { width: 30px; padding: 0; }
+  :global(.bookmark-actions a:hover), :global(.bookmark-actions button:hover) { background: var(--bg-soft); color: var(--text); }
+  :global(.bookmark-actions svg) { width: 15px; height: 15px; }
+  .skeleton-card { height: 62px; border: 1px solid var(--line); border-radius: var(--radius); background: linear-gradient(90deg, var(--bg) 25%, var(--bg-soft) 50%, var(--bg) 75%); background-size: 200% 100%; animation: shimmer 1.4s infinite; }
+  .empty-state { padding: 64px 20px; text-align: center; }
+  .empty-state p { margin: 0; color: var(--text-3); font-size: 13px; }
+  .toast { position: fixed; z-index: 40; left: 50%; bottom: 24px; transform: translate(-50%, 10px); padding: 8px 12px; border-radius: 6px; background: var(--text); color: var(--bg); font-size: 12px; opacity: 0; pointer-events: none; transition: .18s ease; box-shadow: var(--shadow); }
+  .toast.is-visible { opacity: 1; transform: translate(-50%, 0); }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+
+  @media (max-width: 620px) {
+    .bookmarks-shell { padding-top: 44px; }
+    .page-header { align-items: center; }
+    .composer { padding: 16px; }
+    .board { padding-top: 48px; }
+    :global(.bookmark-actions > a) { display: none; }
+  }
+</style>
