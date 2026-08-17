@@ -14,8 +14,7 @@ import type { PhotoVariant } from './types';
 const MAX_UPLOAD = 100 * 1024 * 1024;
 const MAX_IMAGE_BINDING_INPUT = 20_000_000;
 const MAX_WEB_WIDTH = 4096;
-const WIDTHS = [320, 640, 1280, 2048, MAX_WEB_WIDTH];
-const WEB_IMAGE_QUALITY = 82;
+const WIDTHS = [640, 1280, 2048, MAX_WEB_WIDTH];
 
 type Bindings = {
   MEDIA: R2Bucket;
@@ -71,7 +70,6 @@ async function processImageUpload(
   const item = safeSegment(itemName);
   const originalPath = `${group}/${item}/${photoId}${ext}`;
   const key = `originals/${originalPath}`;
-  const storedKeys = [key];
 
   try {
     onProgress?.({ stage: 'decoding', percent: 5 });
@@ -95,29 +93,7 @@ async function processImageUpload(
 
     const maxWidth = Math.min(originalWidth, MAX_WEB_WIDTH);
     const widths = [...new Set(WIDTHS.filter((width) => width < maxWidth).concat(maxWidth))];
-    const variantBase = originalPath.replace(/\.[^.]+$/, '');
-    const variants: PhotoVariant[] = [];
-    for (const [index, width] of widths.entries()) {
-      const variantPath = `${variantBase}-${width}.webp`;
-      const transformed = await bindings().IMAGES
-        .input(file.stream())
-        .transform({ width, fit: 'scale-down' })
-        .output({ format: 'image/webp', quality: WEB_IMAGE_QUALITY });
-      const response = transformed.response();
-      if (!response.ok || !response.body) throw new Error('IMAGE_TRANSFORM_FAILED');
-      const variantKey = `public/${variantPath}`;
-      await bindings().MEDIA.put(variantKey, response.body, {
-        httpMetadata: {
-          contentType: 'image/webp',
-          cacheControl: 'public, max-age=31536000, immutable',
-        },
-        customMetadata: {
-          source: originalPath,
-          width: String(width),
-          height: String(Math.max(1, Math.round(originalHeight * width / originalWidth))),
-        },
-      });
-      storedKeys.push(variantKey);
+    const variants = widths.map((width, index): PhotoVariant => {
       onProgress?.({
         stage: 'resizing',
         percent: 20 + Math.round(((index + 1) / widths.length) * 75),
@@ -125,13 +101,13 @@ async function processImageUpload(
         variant: index + 1,
         totalVariants: widths.length,
       });
-      variants.push({
+      return {
         width,
         height: Math.max(1, Math.round(originalHeight * width / originalWidth)),
         size: 0,
-        path: variantPath,
-      });
-    }
+        path: `${originalPath}?width=${width}`,
+      };
+    });
 
     onProgress?.({ stage: 'complete', percent: 100 });
     return {
@@ -143,7 +119,7 @@ async function processImageUpload(
       featured: false,
     };
   } catch (error) {
-    await bindings().MEDIA.delete(storedKeys);
+    await bindings().MEDIA.delete(key);
     throw error;
   }
 }

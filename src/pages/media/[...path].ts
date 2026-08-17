@@ -1,4 +1,4 @@
-import { env, waitUntil } from 'cloudflare:workers';
+import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
 
 type Bindings = {
@@ -23,7 +23,7 @@ function contentHeaders(object: R2ObjectBody, path: string) {
   return headers;
 }
 
-async function transformImage(bindings: Bindings, originalPath: string, width: number, persistPath?: string) {
+async function transformImage(bindings: Bindings, originalPath: string, width: number) {
   const key = `originals/${originalPath}`;
   const original = await bindings.MEDIA.get(key);
   if (!original) return null;
@@ -35,17 +35,6 @@ async function transformImage(bindings: Bindings, originalPath: string, width: n
     const response = result.response();
     const headers = new Headers(response.headers);
     headers.set('cache-control', 'public, max-age=31536000, immutable');
-    if (persistPath && response.ok && response.body) {
-      const [clientBody, storedBody] = response.body.tee();
-      waitUntil(bindings.MEDIA.put(`public/${persistPath}`, storedBody, {
-        httpMetadata: {
-          contentType: headers.get('content-type') ?? 'image/webp',
-          cacheControl: 'public, max-age=31536000, immutable',
-        },
-        customMetadata: { source: originalPath, width: String(width) },
-      }));
-      return new Response(clientBody, { status: response.status, headers });
-    }
     return new Response(response.body, { status: response.status, headers });
   } catch {
     // Some legacy originals exceed the Images binding input limit. They are
@@ -81,7 +70,7 @@ export const GET: APIRoute = async ({ params, request, url }) => {
   if (!object) {
     const legacyVariant = params.path.match(/^(.*)-(\d+)\.(?:jpe?g|png|webp)$/i);
     if (legacyVariant) {
-      const generated = await transformImage(bindings, `${legacyVariant[1]}.jpeg`, Number(legacyVariant[2]), params.path);
+      const generated = await transformImage(bindings, `${legacyVariant[1]}.jpeg`, Number(legacyVariant[2]));
       if (generated) return generated;
     }
     const fallback = await fetchLocalFallback(bindings, params.path, url);
