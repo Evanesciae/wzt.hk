@@ -27,6 +27,7 @@ const hasJourneys = routes.length > 0 || surfaceRoutes.length > 0;
   {hasJourneys && <div class="journey-map-legend" aria-label="路线图例">
     {routes.length > 0 && <span><i class="is-flight"></i>飞机</span>}
     {surfaceRoutes.some((route) => route.mode === 'rail') && <span><i class="is-rail"></i>铁路</span>}
+    {surfaceRoutes.some((route) => route.mode === 'transit') && <span><i class="is-transit"></i>巴士</span>}
     {surfaceRoutes.some((route) => route.mode === 'drive') && <span><i class="is-drive"></i>自驾</span>}
   </div>}
   {hasJourneys && <div class="flight-map-hud" aria-hidden="true"><span></span>FOOTPRINT</div>}
@@ -41,7 +42,7 @@ const hasJourneys = routes.length > 0 || surfaceRoutes.length > 0;
   interface Route { from: RoutePoint; to: RoutePoint }
   interface RouteGroup { key: string; pairKey: string; from: RoutePoint; to: RoutePoint; count: number }
   interface SurfaceStop { name: string; lat: number; lng: number }
-  interface SurfaceJourney { id: string; mode: 'rail' | 'drive'; title: string; stops: SurfaceStop[]; coordinates: [number, number][] }
+  interface SurfaceJourney { id: string; mode: 'rail' | 'drive' | 'transit'; title: string; stops: SurfaceStop[]; coordinates: [number, number][] }
   interface GeoPoint { lat: number; lng: number }
 
   type Vector3 = [number, number, number];
@@ -402,13 +403,13 @@ const hasJourneys = routes.length > 0 || surfaceRoutes.length > 0;
         id: route.id,
         mode: route.mode,
         title: route.title,
-        caption: route.mode === 'rail' ? '铁路' : '自驾',
+        caption: route.mode === 'rail' ? '铁路' : route.mode === 'transit' ? '巴士' : '自驾',
       },
       geometry: { type: 'LineString' as const, coordinates: route.coordinates },
     }));
     const surfaceStopMap = new Map<string, SurfaceStop>();
     surfaceRoutes
-      .filter((route) => route.mode === 'rail')
+      .filter((route) => route.mode !== 'drive')
       .forEach((route) => route.stops.forEach((stop) => surfaceStopMap.set(stop.name, stop)));
     const surfaceStopFeatures = [...surfaceStopMap.values()].map((stop) => ({
       type: 'Feature' as const,
@@ -523,6 +524,18 @@ const hasJourneys = routes.length > 0 || surfaceRoutes.length > 0;
             'line-color': dark ? '#deb765' : '#b88632',
             'line-width': ['interpolate', ['linear'], ['zoom'], 0, .8, 2, 1.25, 5, 1.8, 8, 2.2],
             'line-opacity': ['interpolate', ['linear'], ['zoom'], 0, .5, 2, .65, 5, .82],
+          },
+        });
+        map.addLayer({
+          id: 'surface-transit-line',
+          type: 'line',
+          source: 'surface-routes',
+          filter: ['==', ['get', 'mode'], 'transit'],
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: {
+            'line-color': dark ? '#7fa6bd' : '#668ba1',
+            'line-width': ['interpolate', ['linear'], ['zoom'], 0, .7, 2, 1.15, 5, 1.7, 8, 2.1],
+            'line-opacity': ['interpolate', ['linear'], ['zoom'], 0, .34, 2, .48, 5, .68],
           },
         });
         map.addLayer({

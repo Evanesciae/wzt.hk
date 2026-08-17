@@ -346,6 +346,7 @@ button, input { font: inherit; }
 .journey-map-legend span { display: inline-flex; gap: 5px; align-items: center; }
 .journey-map-legend i { display: inline-block; width: 16px; height: 2px; border-radius: 4px; background: #2f7da8; }
 .journey-map-legend .is-rail { background: #b88632; }
+.journey-map-legend .is-transit { background: rgb(102 139 161 / 82%); }
 .journey-map-legend .is-drive { background: rgb(87 122 109 / 72%); }
 .flight-map-frame .maplibregl-ctrl-attrib { border-radius: 5px 0 0 0; background: rgb(255 255 255 / 68%); color: #526a78; backdrop-filter: blur(10px); }
 .flight-map-frame .maplibregl-ctrl-attrib a { color: inherit; }
@@ -866,5 +867,6 @@ button, input { font: inherit; }
 :root[data-theme="dark"] .journey-map-legend { border-color: rgb(155 216 255 / 13%); background: rgb(5 13 21 / 78%); color: #c6dce8; }
 :root[data-theme="dark"] .journey-map-legend i { background: #70c6ef; }
 :root[data-theme="dark"] .journey-map-legend .is-rail { background: #deb765; }
+:root[data-theme="dark"] .journey-map-legend .is-transit { background: rgb(127 166 189 / 86%); }
 :root[data-theme="dark"] .journey-map-legend .is-drive { background: rgb(113 148 135 / 68%); }
 :root[data-theme="dark"] .flight-map-frame .maplibregl-ctrl-attrib { background: rgb(5 13 21 / 62%); color: #8098a6; }
