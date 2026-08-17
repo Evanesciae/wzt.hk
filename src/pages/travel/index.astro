@@ -14,9 +14,9 @@ const airports = new Set(flights.flatMap((flight) => [flight.fromAirport.code, f
 
     <a class="travel-tool-card" href="/travel/flights/">
       <div>
-        <p class="eyebrow">FLIGHT LOG</p>
-        <h2>飞行日记</h2>
-        <p>{flights.length} 段航班 · {airports.size} 个机场</p>
+        <p class="eyebrow">TRAVEL FOOTPRINT</p>
+        <h2>旅行足迹</h2>
+        <p>飞机、铁路与自驾路线 · {airports.size} 个机场</p>
       </div>
       <span aria-hidden="true">→</span>
     </a>

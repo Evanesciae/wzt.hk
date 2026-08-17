@@ -7,10 +7,10 @@ import { formatFlightDate } from '../../lib/content';
 const [flights, trips] = await Promise.all([listFlights(), listTrips(true)]);
 ---
 
-<BaseLayout title="飞行日记管理">
+<BaseLayout title="航班记录管理">
   <div class="container page-shell admin-dashboard">
     <div class="admin-heading">
-      <div><a href="/admin/" class="back-link">← 管理中心</a><p class="eyebrow">FLIGHTS</p><h1>飞行日记</h1></div>
+      <div><a href="/admin/" class="back-link">← 管理中心</a><p class="eyebrow">FLIGHTS</p><h1>航班记录</h1></div>
       <div class="admin-heading-actions"><a class="text-button" href="/admin/airports">机场管理</a><a class="text-button" href="/travel/flights/" target="_blank">查看页面 ↗</a></div>
     </div>
 
