@@ -1,29 +1,37 @@
 ---
 import 'maplibre-gl/dist/maplibre-gl.css';
+import type { SurfaceRoute } from '../data/travel-routes';
 import type { Flight } from '../server/types';
 
 interface Props {
   flights: Flight[];
+  surfaceRoutes?: SurfaceRoute[];
   compact?: boolean;
 }
 
-const { flights, compact = false } = Astro.props;
+const { flights, surfaceRoutes = [], compact = false } = Astro.props;
 const routes = flights.map((flight) => ({
   from: { code: flight.fromAirport.code, city: flight.fromAirport.city, lat: flight.fromAirport.lat, lng: flight.fromAirport.lng },
   to: { code: flight.toAirport.code, city: flight.toAirport.city, lat: flight.toAirport.lat, lng: flight.toAirport.lng },
 })).filter((route) => Number.isFinite(route.from.lat) && Number.isFinite(route.from.lng)
   && Number.isFinite(route.to.lat) && Number.isFinite(route.to.lng));
+const hasJourneys = routes.length > 0 || surfaceRoutes.length > 0;
 ---
 
-<div class:list={['flight-map-frame', compact && 'flight-map-compact']} data-flight-map data-compact={compact ? 'true' : 'false'} data-routes={JSON.stringify(routes)}>
+<div class:list={['flight-map-frame', compact && 'flight-map-compact']} data-flight-map data-compact={compact ? 'true' : 'false'} data-routes={JSON.stringify(routes)} data-surface-routes={JSON.stringify(surfaceRoutes)}>
   <div class="flight-map-actions">
-    <button class="map-fullscreen-button" type="button" data-flight-map-fullscreen aria-label="全屏查看飞行地图">全屏</button>
+    <button class="map-fullscreen-button" type="button" data-flight-map-fullscreen aria-label="全屏查看旅行足迹">全屏</button>
     <button class="map-fullscreen-button" type="button" data-flight-map-home aria-label="缩小至地球视图">地球</button>
   </div>
-  <div class="map-canvas flight-globe-canvas" data-flight-map-canvas aria-label="可旋转的球形飞行地图"></div>
-  {routes.length > 0 && <div class="flight-map-hud" aria-hidden="true"><span></span>GLOBE VIEW</div>}
-  {routes.length === 0 && <div class="map-empty">还没有可绘制的航线。</div>}
-  {routes.length > 0 && <div class="map-load-status" data-map-load-status hidden>地图暂时无法加载，航班列表仍可正常浏览。</div>}
+  <div class="map-canvas flight-globe-canvas" data-flight-map-canvas aria-label="可旋转的球形旅行足迹地图"></div>
+  {hasJourneys && <div class="journey-map-legend" aria-label="路线图例">
+    {routes.length > 0 && <span><i class="is-flight"></i>飞机</span>}
+    {surfaceRoutes.some((route) => route.mode === 'rail') && <span><i class="is-rail"></i>铁路</span>}
+    {surfaceRoutes.some((route) => route.mode === 'drive') && <span><i class="is-drive"></i>自驾</span>}
+  </div>}
+  {hasJourneys && <div class="flight-map-hud" aria-hidden="true"><span></span>FOOTPRINT</div>}
+  {!hasJourneys && <div class="map-empty">还没有可绘制的旅行足迹。</div>}
+  {hasJourneys && <div class="map-load-status" data-map-load-status hidden>地图暂时无法加载，足迹列表仍可正常浏览。</div>}
 </div>
 
 <script>
@@ -32,12 +40,15 @@ const routes = flights.map((flight) => ({
   interface RoutePoint { code: string; city: string; lat: number; lng: number }
   interface Route { from: RoutePoint; to: RoutePoint }
   interface RouteGroup { key: string; pairKey: string; from: RoutePoint; to: RoutePoint; count: number }
+  interface SurfaceStop { name: string; lat: number; lng: number }
+  interface SurfaceJourney { id: string; mode: 'rail' | 'drive'; title: string; stops: SurfaceStop[]; coordinates: [number, number][] }
+  interface GeoPoint { lat: number; lng: number }
 
   type Vector3 = [number, number, number];
   type ArcPoint = [number, number, number];
   interface ArcLane { points: ArcPoint[]; offset: number }
 
-  function toVector(point: RoutePoint): Vector3 {
+  function toVector(point: GeoPoint): Vector3 {
     const latitude = point.lat * Math.PI / 180;
     const longitude = point.lng * Math.PI / 180;
     const radius = Math.cos(latitude);
@@ -278,8 +289,8 @@ const routes = flights.map((flight) => ({
           gl.uniform4fv(gl.getUniformLocation(program!, 'u_color'), color);
           gl.drawArrays(gl.TRIANGLES, 0, vertexData.length / 11);
         };
-        draw(2.4, dark ? [.2, .64, .92, .1] : [.05, .37, .65, .07]);
-        draw(.72, dark ? [.5, .82, 1, .88] : [.03, .32, .57, .78]);
+        draw(3, dark ? [.28, .68, .92, .13] : [.05, .39, .64, .11]);
+        draw(.95, dark ? [.48, .8, .97, .94] : [.04, .36, .61, .9]);
         gl.depthMask(true);
       },
       onRemove(_map, rawGl) {
@@ -292,7 +303,7 @@ const routes = flights.map((flight) => ({
     };
   }
 
-  function centerOf(points: RoutePoint[]): [number, number] {
+  function centerOf(points: GeoPoint[]): [number, number] {
     const vector = points.reduce<Vector3>((total, point) => {
       const next = toVector(point);
       return [total[0] + next[0], total[1] + next[1], total[2] + next[2]];
@@ -307,26 +318,31 @@ const routes = flights.map((flight) => ({
     if (root.dataset.ready) return;
     root.dataset.ready = 'true';
     const routes: Route[] = JSON.parse(root.dataset.routes ?? '[]');
+    const surfaceRoutes: SurfaceJourney[] = JSON.parse(root.dataset.surfaceRoutes ?? '[]');
     const canvas = root.querySelector<HTMLElement>('[data-flight-map-canvas]');
     const fullscreenButton = root.querySelector<HTMLButtonElement>('[data-flight-map-fullscreen]');
     const homeButton = root.querySelector<HTMLButtonElement>('[data-flight-map-home]');
-    if (!canvas || routes.length === 0) return;
+    if (!canvas || (routes.length === 0 && surfaceRoutes.length === 0)) return;
     const { default: maplibregl } = await import('maplibre-gl');
     let dark = document.documentElement.dataset.theme === 'dark';
     const loadStatus = root.querySelector<HTMLElement>('[data-map-load-status]');
     let loaded = false;
     const compact = root.dataset.compact === 'true';
     const airports = routes.flatMap((route) => [route.from, route.to]);
-    const overviewCenter = centerOf(airports);
+    const surfacePoints = surfaceRoutes.flatMap((route) => route.stops.length > 0
+      ? route.stops
+      : route.coordinates.map(([lng, lat]) => ({ lat, lng })));
+    const overviewCenter = centerOf([...airports, ...surfacePoints]);
     const overviewZoomForWidth = () => compact
       ? 1.65
-      : (canvas.clientWidth < 620 ? .72 : Math.min(2.35, 1.5 + Math.log2(canvas.clientWidth / 700)));
+      : Math.min(2.35, .72 + Math.max(0, Math.log2(canvas.clientWidth / 420)) * 1.05);
     const overviewZoom = overviewZoomForWidth();
     const map = new maplibregl.Map({
       container: canvas,
       style: `https://tiles.openfreemap.org/styles/${dark ? 'dark' : 'positron'}`,
       center: overviewCenter,
       zoom: overviewZoomForWidth(),
+      pitch: 12,
       cooperativeGestures: true,
       renderWorldCopies: false,
     });
@@ -336,7 +352,7 @@ const routes = flights.map((flight) => ({
       center: overviewCenter,
       zoom: overviewZoom,
       bearing: 0,
-      pitch: 0,
+      pitch: 12,
       duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 900,
     });
     homeButton?.addEventListener('click', showGlobe);
@@ -380,6 +396,25 @@ const routes = flights.map((flight) => ({
       properties: { code: airport.code, visits: airportVisits.get(airport.code) ?? 1, title: `${airport.city} ${airport.code}` },
       geometry: { type: 'Point' as const, coordinates: [airport.lng, airport.lat] as [number, number] },
     }));
+    const surfaceFeatures = surfaceRoutes.map((route) => ({
+      type: 'Feature' as const,
+      properties: {
+        id: route.id,
+        mode: route.mode,
+        title: route.title,
+        caption: route.mode === 'rail' ? '铁路' : '自驾',
+      },
+      geometry: { type: 'LineString' as const, coordinates: route.coordinates },
+    }));
+    const surfaceStopMap = new Map<string, SurfaceStop>();
+    surfaceRoutes
+      .filter((route) => route.mode === 'rail')
+      .forEach((route) => route.stops.forEach((stop) => surfaceStopMap.set(stop.name, stop)));
+    const surfaceStopFeatures = [...surfaceStopMap.values()].map((stop) => ({
+      type: 'Feature' as const,
+      properties: { title: stop.name },
+      geometry: { type: 'Point' as const, coordinates: [stop.lng, stop.lat] as [number, number] },
+    }));
 
     let interactionsBound = false;
     let initialViewApplied = false;
@@ -387,88 +422,235 @@ const routes = flights.map((flight) => ({
       loaded = true;
       if (loadStatus) loadStatus.hidden = true;
       map.setProjection({ type: 'globe' });
+      const palette = dark
+        ? { land: '#15212a', ocean: '#07131c', boundary: '#31414b' }
+        : { land: '#f2f0ea', ocean: '#d7e3e8', boundary: '#b6c1c5' };
+      map.getStyle().layers?.forEach((layer) => {
+        const sourceLayer = 'source-layer' in layer ? String(layer['source-layer'] ?? '') : '';
+        const layerName = `${layer.id} ${sourceLayer}`.toLowerCase();
+        if (layer.type === 'symbol') {
+          const isPlaceLabel = sourceLayer.toLowerCase() === 'place' || /(^|[-_ ])place([-_ ]|$)/.test(layerName);
+          const isWaterLabel = sourceLayer.toLowerCase() === 'water_name'
+            || /(ocean|sea|marine|water)[-_ ]?(name|label)/.test(layerName);
+          if (!isPlaceLabel && !isWaterLabel) {
+            map.setLayoutProperty(layer.id, 'visibility', 'none');
+            return;
+          }
+          const isCountry = /country/.test(layerName);
+          const isRegion = /(state|province)/.test(layerName);
+          const isLocalPlace = /(town|village|hamlet|suburb|neighbourhood)/.test(layerName);
+          const opacity = isCountry ? .72 : isRegion ? .52 : isLocalPlace ? .42 : isWaterLabel ? .38 : .6;
+          map.setLayoutProperty(layer.id, 'visibility', 'visible');
+          map.setPaintProperty(layer.id, 'text-color', isWaterLabel
+            ? (dark ? '#7994a3' : '#758b94')
+            : (dark ? '#aebcc4' : '#59666c'));
+          map.setPaintProperty(layer.id, 'text-opacity', dark ? Math.min(opacity + .06, .78) : opacity);
+          map.setPaintProperty(layer.id, 'text-halo-color', dark ? '#07131c' : '#f2f0ea');
+          map.setPaintProperty(layer.id, 'text-halo-width', 1.15);
+          return;
+        }
+        if (layer.type === 'circle' || layer.type === 'fill-extrusion'
+          || layer.type === 'heatmap' || layer.type === 'hillshade' || layer.type === 'raster') {
+          map.setLayoutProperty(layer.id, 'visibility', 'none');
+          return;
+        }
+        if (layer.type === 'background') {
+          map.setPaintProperty(layer.id, 'background-color', palette.land);
+          return;
+        }
+        if (layer.type === 'fill') {
+          if (layerName.includes('water')) {
+            map.setPaintProperty(layer.id, 'fill-color', palette.ocean);
+            map.setPaintProperty(layer.id, 'fill-opacity', 1);
+          } else if (/earth|landmass/.test(layerName)) {
+            map.setPaintProperty(layer.id, 'fill-color', palette.land);
+            map.setPaintProperty(layer.id, 'fill-opacity', 1);
+          } else {
+            map.setLayoutProperty(layer.id, 'visibility', 'none');
+          }
+          return;
+        }
+        if (layer.type === 'line') {
+          const isCountryBoundary = layerName.includes('boundary')
+            && /(country|admin[_-]?0|boundary[_-]?2)/.test(layerName);
+          if (isCountryBoundary) {
+            map.setPaintProperty(layer.id, 'line-color', palette.boundary);
+            map.setPaintProperty(layer.id, 'line-opacity', dark ? .5 : .58);
+            map.setPaintProperty(layer.id, 'line-width', .65);
+          } else {
+            map.setLayoutProperty(layer.id, 'visibility', 'none');
+          }
+        }
+      });
       map.setSky({
-        'sky-color': dark ? '#03070d' : '#d9e7f0',
-        'horizon-color': dark ? '#203142' : '#f8fbfd',
-        'fog-color': dark ? '#111c27' : '#edf4f7',
-        'sky-horizon-blend': .72,
-        'horizon-fog-blend': .76,
-        'fog-ground-blend': .35,
+        'sky-color': dark ? '#030910' : '#dbe7ec',
+        'horizon-color': dark ? '#101b24' : '#f6f8f7',
+        'fog-color': dark ? '#071018' : '#e9f0f1',
+        'sky-horizon-blend': .78,
+        'horizon-fog-blend': .82,
+        'fog-ground-blend': .42,
         'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 1, 5, 1, 7, 0],
       });
       map.setLight({
         anchor: 'viewport',
-        color: dark ? '#9abed2' : '#ffffff',
-        intensity: dark ? .32 : .88,
+        color: dark ? '#a5c4d4' : '#ffffff',
+        intensity: dark ? .28 : .7,
         position: [1.5, 90, 18],
       });
       if (!initialViewApplied) {
         initialViewApplied = true;
-        map.jumpTo({ center: overviewCenter, zoom: overviewZoom, bearing: 0, pitch: 0 });
+        map.jumpTo({ center: overviewCenter, zoom: overviewZoom, bearing: 0, pitch: 12 });
       }
-      map.addLayer(createArcLayer(visualArcs, dark));
-      map.addSource('flight-routes', { type: 'geojson', lineMetrics: true, data: { type: 'FeatureCollection', features: routeFeatures } });
-      map.addLayer({
-        id: 'flight-routes-hit',
-        type: 'line',
-        source: 'flight-routes',
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-width': 14, 'line-opacity': 0 },
-      });
-      map.addSource('flight-airports', { type: 'geojson', data: { type: 'FeatureCollection', features: airportFeatures } });
-      map.addLayer({
-        id: 'flight-airports-glow',
-        type: 'circle',
-        source: 'flight-airports',
-        paint: {
-          'circle-radius': ['interpolate', ['linear'], ['get', 'visits'], 1, 6, 10, 11, 30, 16],
-          'circle-color': dark ? '#7bc8fa' : '#3183b5',
-          'circle-opacity': dark ? .18 : .12,
-          'circle-blur': .45,
-        },
-      });
-      map.addLayer({
-        id: 'flight-airports-dot',
-        type: 'circle',
-        source: 'flight-airports',
-        paint: {
-          'circle-radius': ['interpolate', ['linear'], ['get', 'visits'], 1, 2.8, 10, 4.6, 30, 6],
-          'circle-color': dark ? '#eaf7ff' : '#fff',
-          'circle-stroke-color': dark ? '#68bce9' : '#176b9e',
-          'circle-stroke-width': 1.5,
-        },
-      });
-      map.addLayer({
-        id: 'flight-airports-label',
-        type: 'symbol',
-        source: 'flight-airports',
-        layout: {
-          'text-field': ['get', 'code'],
-          'text-size': ['interpolate', ['linear'], ['zoom'], 0, 9, 4, 11, 8, 12],
-          'text-offset': [0, 1.1],
-          'text-anchor': 'top',
-          'text-letter-spacing': .08,
-          'text-optional': true,
-        },
-        paint: { 'text-color': dark ? '#eef8ff' : '#173b50', 'text-halo-color': dark ? '#071019' : '#f7fbfd', 'text-halo-width': 1.4 },
-      });
+      if (routeFeatures.length > 0) {
+        map.addSource('flight-routes', { type: 'geojson', lineMetrics: true, data: { type: 'FeatureCollection', features: routeFeatures } });
+        map.addLayer({
+          id: 'flight-routes-hit',
+          type: 'line',
+          source: 'flight-routes',
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: { 'line-width': 14, 'line-opacity': 0 },
+        });
+      }
+      if (surfaceFeatures.length > 0) {
+        map.addSource('surface-routes', { type: 'geojson', data: { type: 'FeatureCollection', features: surfaceFeatures } });
+        map.addLayer({
+          id: 'surface-rail-line',
+          type: 'line',
+          source: 'surface-routes',
+          filter: ['==', ['get', 'mode'], 'rail'],
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: {
+            'line-color': dark ? '#deb765' : '#b88632',
+            'line-width': ['interpolate', ['linear'], ['zoom'], 0, .8, 2, 1.25, 5, 1.8, 8, 2.2],
+            'line-opacity': ['interpolate', ['linear'], ['zoom'], 0, .5, 2, .65, 5, .82],
+          },
+        });
+        map.addLayer({
+          id: 'surface-drive-line',
+          type: 'line',
+          source: 'surface-routes',
+          filter: ['==', ['get', 'mode'], 'drive'],
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: {
+            'line-color': dark ? '#719487' : '#577a6d',
+            'line-width': ['interpolate', ['linear'], ['zoom'], 0, .75, 2, 1.25, 5, 2, 8, 2.4],
+            'line-opacity': ['interpolate', ['linear'], ['zoom'], 0, .3, 2, .42, 5, .58],
+          },
+        });
+        map.addLayer({
+          id: 'surface-routes-hit',
+          type: 'line',
+          source: 'surface-routes',
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: { 'line-width': 16, 'line-opacity': 0 },
+        });
+      }
+      if (airportFeatures.length > 0) {
+        map.addSource('flight-airports', { type: 'geojson', data: { type: 'FeatureCollection', features: airportFeatures } });
+        map.addLayer({
+          id: 'flight-airports-glow',
+          type: 'circle',
+          source: 'flight-airports',
+          paint: {
+            'circle-radius': ['interpolate', ['linear'], ['get', 'visits'], 1, 6, 10, 11, 30, 16],
+            'circle-color': dark ? '#7bc8fa' : '#3183b5',
+            'circle-opacity': dark ? .18 : .12,
+            'circle-blur': .45,
+          },
+        });
+        map.addLayer({
+          id: 'flight-airports-dot',
+          type: 'circle',
+          source: 'flight-airports',
+          paint: {
+            'circle-radius': ['interpolate', ['linear'], ['get', 'visits'], 1, 2.8, 10, 4.6, 30, 6],
+            'circle-color': dark ? '#eaf7ff' : '#fff',
+            'circle-stroke-color': dark ? '#68bce9' : '#176b9e',
+            'circle-stroke-width': 1.5,
+          },
+        });
+        map.addLayer({
+          id: 'flight-airports-label',
+          type: 'symbol',
+          source: 'flight-airports',
+          minzoom: 1.35,
+          layout: {
+            'text-field': ['get', 'code'],
+            'text-size': ['interpolate', ['linear'], ['zoom'], 0, 9, 4, 11, 8, 12],
+            'text-offset': [0, 1.1],
+            'text-anchor': 'top',
+            'text-letter-spacing': .08,
+            'text-optional': true,
+          },
+          paint: { 'text-color': dark ? '#eef8ff' : '#173b50', 'text-halo-color': dark ? '#071019' : '#f7fbfd', 'text-halo-width': 1.4 },
+        });
+      }
+      if (surfaceStopFeatures.length > 0) {
+        map.addSource('surface-stops', { type: 'geojson', data: { type: 'FeatureCollection', features: surfaceStopFeatures } });
+        map.addLayer({
+          id: 'surface-stops-glow',
+          type: 'circle',
+          source: 'surface-stops',
+          minzoom: 2.7,
+          paint: { 'circle-radius': 6, 'circle-color': dark ? '#deb765' : '#b88632', 'circle-opacity': .11, 'circle-blur': .45 },
+        });
+        map.addLayer({
+          id: 'surface-stops-dot',
+          type: 'circle',
+          source: 'surface-stops',
+          minzoom: 2.7,
+          paint: { 'circle-radius': 2.6, 'circle-color': dark ? '#f6eedb' : '#fffaf0', 'circle-stroke-color': dark ? '#deb765' : '#a87529', 'circle-stroke-width': 1.2 },
+        });
+        map.addLayer({
+          id: 'surface-stops-label',
+          type: 'symbol',
+          source: 'surface-stops',
+          minzoom: 4,
+          layout: { 'text-field': ['get', 'title'], 'text-size': 10.5, 'text-offset': [0, 1.05], 'text-anchor': 'top', 'text-optional': true },
+          paint: { 'text-color': dark ? '#f6f2e7' : '#473520', 'text-halo-color': dark ? '#071019' : '#fff', 'text-halo-width': 1.4 },
+        });
+      }
+      if (visualArcs.length > 0) {
+        map.addLayer(createArcLayer(visualArcs, dark));
+        if (airportFeatures.length > 0) {
+          map.moveLayer('flight-airports-glow');
+          map.moveLayer('flight-airports-dot');
+          map.moveLayer('flight-airports-label');
+        }
+      }
       if (!interactionsBound) {
         interactionsBound = true;
-        ['flight-routes-hit', 'flight-airports-dot'].forEach((layer) => {
+        const interactiveLayers = [
+          routeFeatures.length > 0 ? 'flight-routes-hit' : '',
+          airportFeatures.length > 0 ? 'flight-airports-dot' : '',
+          surfaceFeatures.length > 0 ? 'surface-routes-hit' : '',
+          surfaceStopFeatures.length > 0 ? 'surface-stops-dot' : '',
+        ].filter(Boolean);
+        interactiveLayers.forEach((layer) => {
           map.on('mouseenter', layer, () => { canvas.style.cursor = 'pointer'; });
           map.on('mouseleave', layer, () => { canvas.style.cursor = ''; });
         });
-        map.on('click', 'flight-routes-hit', (event) => {
+        if (routeFeatures.length > 0) map.on('click', 'flight-routes-hit', (event) => {
           const feature = event.features?.[0];
           const coordinates = event.lngLat;
           if (feature?.properties?.title) new maplibregl.Popup({ offset: 12 }).setLngLat(coordinates).setText(feature.properties.title).addTo(map);
         });
-        map.on('click', 'flight-airports-dot', (event) => {
+        if (airportFeatures.length > 0) map.on('click', 'flight-airports-dot', (event) => {
           const feature = event.features?.[0];
           if (!feature?.properties?.title) return;
           const visits = Number(feature.properties.visits ?? 0);
           new maplibregl.Popup({ offset: 12 }).setLngLat(event.lngLat)
             .setText(`${feature.properties.title}${visits ? ` · ${visits} 次起降` : ''}`).addTo(map);
+        });
+        if (surfaceFeatures.length > 0) map.on('click', 'surface-routes-hit', (event) => {
+          const feature = event.features?.[0];
+          if (!feature?.properties?.title) return;
+          new maplibregl.Popup({ offset: 12 }).setLngLat(event.lngLat)
+            .setText(`${feature.properties.title} · ${feature.properties.caption}`).addTo(map);
+        });
+        if (surfaceStopFeatures.length > 0) map.on('click', 'surface-stops-dot', (event) => {
+          const feature = event.features?.[0];
+          if (feature?.properties?.title) new maplibregl.Popup({ offset: 12 }).setLngLat(event.lngLat).setText(feature.properties.title).addTo(map);
         });
       }
     });

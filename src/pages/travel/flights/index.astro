@@ -2,41 +2,40 @@
 import BaseLayout from '../../../layouts/BaseLayout.astro';
 import PageHeader from '../../../components/PageHeader.astro';
 import FlightMap from '../../../components/FlightMap.astro';
+import { surfaceRoutes } from '../../../data/travel-routes';
 import { listFlights } from '../../../server/database';
 import { formatFlightDate } from '../../../lib/content';
 
 const flights = await listFlights();
-const airports = new Set(flights.flatMap((flight) => [flight.fromAirport.code, flight.toAirport.code]));
-const totalDistance = flights.reduce((total, flight) => total + (flight.distanceKm ?? 0), 0);
-const totalDuration = flights.reduce((total, flight) => total + (flight.durationMinutes ?? 0), 0);
+const footprintPlaces = new Set([
+  ...flights.flatMap((flight) => [flight.fromAirport.city, flight.toAirport.city]),
+  ...surfaceRoutes.flatMap((route) => route.stops.map((stop) => stop.name)),
+]);
+const railRoutes = surfaceRoutes.filter((route) => route.mode === 'rail');
+const driveRoutes = surfaceRoutes.filter((route) => route.mode === 'drive');
 const airlineCounts = flights.reduce((map, flight) => {
   const name = flight.airlineName ?? flight.airlineCode ?? '未记录';
   map.set(name, (map.get(name) ?? 0) + 1);
   return map;
 }, new Map<string, number>());
-const topAirline = [...airlineCounts.entries()].sort((a, b) => b[1] - a[1])[0];
 const routeCounts = flights.reduce((map, flight) => {
   const route = [flight.fromAirport.code, flight.toAirport.code].sort().join(' ↔ ');
   map.set(route, (map.get(route) ?? 0) + 1);
   return map;
 }, new Map<string, number>());
-const topRoute = [...routeCounts.entries()].sort((a, b) => b[1] - a[1])[0];
 const years = flights.map((flight) => Number(flight.date.slice(0, 4))).filter(Number.isFinite);
 const yearOptions = [...new Set(years)].sort((a, b) => b - a);
 const airlineOptions = [...airlineCounts.keys()].sort((a, b) => a.localeCompare(b, 'zh-CN'));
 const airportCounts = flights.reduce((map, flight) => {
-  [flight.fromAirport, flight.toAirport].forEach((airport) => map.set(airport.code, { label: `${airport.city} ${airport.code}`, count: (map.get(airport.code)?.count ?? 0) + 1 }));
+  [flight.fromAirport, flight.toAirport].forEach((airport) => map.set(airport.code, {
+    label: `${airport.city} ${airport.code}`,
+    count: (map.get(airport.code)?.count ?? 0) + 1,
+  }));
   return map;
 }, new Map<string, { label: string; count: number }>());
 const airportOptions = [...airportCounts.entries()].sort((a, b) => a[1].label.localeCompare(b[1].label, 'zh-CN'));
 const routeOptions = [...routeCounts.keys()].sort();
-const topAirlines = [...airlineCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
-const topAirports = [...airportCounts.entries()].sort((a, b) => b[1].count - a[1].count).slice(0, 5);
-const longestFlights = [...flights].filter((flight) => flight.distanceKm).sort((a, b) => (b.distanceKm ?? 0) - (a.distanceKm ?? 0)).slice(0, 5);
 const flightsByYear = yearOptions.map((year) => ({ year, flights: flights.filter((flight) => Number(flight.date.slice(0, 4)) === year) }));
-const yearRange = years.length > 0
-  ? `${Math.min(...years)}${Math.min(...years) === Math.max(...years) ? '' : `–${Math.max(...years)}`}`
-  : '—';
 
 function time(value?: string) {
   return value ? value.slice(11, 16) : '—';
@@ -48,50 +47,27 @@ function duration(minutes?: number) {
   const m = minutes % 60;
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
-
-function totalDurationLabel(minutes: number) {
-  if (!minutes) return '—';
-  const hours = Math.floor(minutes / 60);
-  const remainder = minutes % 60;
-  return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
-}
 ---
 
-<BaseLayout title="飞行日记" description="旅行里的航班、机场和航线。">
+<BaseLayout title="旅行足迹" description="旅行足迹地图。">
   <div class="container page-shell flights-page">
     <a class="back-link" href="/travel/">← 旅行</a>
-    <PageHeader eyebrow="TRAVEL / FLIGHT LOG" title="飞行日记" description="按时间记录旅行里的航班。" count={flights.length} />
+    <PageHeader eyebrow="TRAVEL / FOOTPRINT" title="旅行足迹" count={footprintPlaces.size} />
 
-    <section class="flight-stats" aria-label="飞行统计">
-      <div><span>总航班</span><strong>{flights.length}</strong></div>
-      <div><span>总里程</span><strong>{Math.round(totalDistance).toLocaleString()} km</strong></div>
-      <div><span>飞行时间</span><strong>{totalDurationLabel(totalDuration)}</strong></div>
-      <div><span>机场</span><strong>{airports.size}</strong></div>
+    <section class="flight-stats" aria-label="旅行足迹统计">
+      <div><span>足迹地点</span><strong>{footprintPlaces.size}</strong></div>
+      <div><span>航班</span><strong>{flights.length}</strong></div>
+      <div><span>铁路</span><strong>{railRoutes.length}</strong></div>
+      <div><span>自驾</span><strong>{driveRoutes.length}</strong></div>
     </section>
-    {flights.length > 0 && (
-      <div class="flight-highlights" aria-label="飞行记录摘要">
-        <span><small>最常飞</small><strong>{topRoute?.[0] ?? '—'}</strong>{topRoute && <em>{topRoute[1]} 次</em>}</span>
-        <span><small>最常乘</small><strong>{topAirline?.[0] ?? '—'}</strong>{topAirline && <em>{topAirline[1]} 次</em>}</span>
-        <span><small>记录</small><strong>{routeCounts.size} 条航线</strong><em>{yearRange}</em></span>
-      </div>
-    )}
 
     <section class="flight-map-section">
-      <div class="section-heading trip-section-heading"><div><p class="eyebrow">MAP</p><h2>飞行地图</h2></div></div>
-      <FlightMap flights={flights} />
+      <div class="section-heading trip-section-heading"><div><p class="eyebrow">MAP</p><h2>足迹地图</h2></div></div>
+      <FlightMap flights={flights} surfaceRoutes={surfaceRoutes} />
     </section>
 
-    {flights.length > 0 && <section class="flight-ranking-section">
-      <div class="section-heading trip-section-heading"><div><p class="eyebrow">EXPLORE</p><h2>飞行排行</h2></div></div>
-      <div class="flight-ranking-grid">
-        <article><h3>常乘航司</h3><ol>{topAirlines.map(([name, count]) => <li><span>{name}</span><strong>{count} 次</strong></li>)}</ol></article>
-        <article><h3>常用机场</h3><ol>{topAirports.map(([, info]) => <li><span>{info.label}</span><strong>{info.count} 次</strong></li>)}</ol></article>
-        <article><h3>最长航班</h3><ol>{longestFlights.map((flight) => <li><span>{flight.fromAirport.code} → {flight.toAirport.code}</span><strong>{flight.distanceKm?.toLocaleString()} km</strong></li>)}</ol></article>
-      </div>
-    </section>}
-
     <section class="flight-log-section">
-      <div class="section-heading trip-section-heading"><div><p class="eyebrow">TIMELINE</p><h2>航班</h2></div><span class="flight-result-count" data-flight-count>{flights.length} 条</span></div>
+      <div class="section-heading trip-section-heading"><div><p class="eyebrow">FLIGHTS</p><h2>航班记录</h2></div><span class="flight-result-count" data-flight-count>{flights.length} 条</span></div>
       <div class="flight-filter-panel" data-flight-filters>
         <label>年份<select data-flight-year><option value="all">全部年份</option>{yearOptions.map((year) => <option value={year}>{year}</option>)}</select></label>
         <label>航司<select data-flight-airline><option value="all">全部航司</option>{airlineOptions.map((airline) => <option value={airline}>{airline}</option>)}</select></label>
@@ -114,7 +90,6 @@ function totalDurationLabel(minutes: number) {
       </div>
       <button class="flight-load-more" type="button" data-flight-more hidden>加载更多</button>
       <p class="filter-empty" data-flight-empty hidden>没有找到匹配的航班。</p>
-      {flights.length === 0 && <p class="empty-note">还没有航班。去管理中心添加。</p>}
     </section>
   </div>
 </BaseLayout>
@@ -127,6 +102,7 @@ function totalDurationLabel(minutes: number) {
   const more = document.querySelector<HTMLButtonElement>('[data-flight-more]');
   const empty = document.querySelector<HTMLElement>('[data-flight-empty]');
   let limit = 20;
+
   function applyFlightFilters(reset = true) {
     if (reset) limit = 20;
     const year = filters?.querySelector<HTMLSelectElement>('[data-flight-year]')?.value ?? 'all';
@@ -144,6 +120,7 @@ function totalDurationLabel(minutes: number) {
     if (empty) empty.hidden = matches.length !== 0;
     if (more) more.hidden = matches.length <= limit;
   }
+
   filters?.querySelectorAll('select').forEach((select) => select.addEventListener('change', () => applyFlightFilters(true)));
   more?.addEventListener('click', () => { limit += 20; applyFlightFilters(false); });
   applyFlightFilters(true);

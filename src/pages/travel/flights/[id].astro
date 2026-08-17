@@ -20,9 +20,9 @@ function duration(minutes?: number) {
 }
 ---
 
-<BaseLayout title={`${flight.flightNumber || '航班待确认'} · 飞行日记`}>
+<BaseLayout title={`${flight.flightNumber || '航班待确认'} · 旅行足迹`}>
   <div class="container trip-page-shell">
-    <a href="/travel/flights/" class="back-link">← 飞行日记</a>
+    <a href="/travel/flights/" class="back-link">← 旅行足迹</a>
     <header class="article-header">
       <p class="eyebrow">{flight.airlineName ?? flight.airlineCode ?? 'FLIGHT'}</p>
       <h1>{flight.fromAirport.code} → {flight.toAirport.code}</h1>
