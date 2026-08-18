@@ -18,8 +18,8 @@ const [flights, trips] = await Promise.all([listFlights(), listTrips(true)]);
       <h2 data-flight-form-title>新增航班</h2>
       <form class="flight-manual-form" data-flight-form>
         <input type="hidden" name="id" />
-        <label>日期信息<select name="datePrecision"><option value="day">具体日期</option><option value="month">只知道月份</option></select></label>
-        <label>日期<input name="date" type="date" required /></label>
+        <label>日期信息<select name="datePrecision"><option value="day">具体日期</option><option value="month">只知道月份</option><option value="unknown">日期不详</option></select></label>
+        <label data-flight-date-field>日期<input name="date" type="date" required /></label>
         <label>航班号<input name="flightNumber" required placeholder="未知可留空" /></label>
         <label>航司<input name="airlineName" placeholder="自动识别，可修改" /></label>
         <label data-exact-date-field>计划起飞<input name="departureTime" type="time" /></label>
@@ -78,10 +78,14 @@ const [flights, trips] = await Promise.all([listFlights(), listTrips(true)]);
   const title = document.querySelector('[data-flight-form-title]');
   const selectedAirports = { from: null, to: null };
   const syncDatePrecision = () => {
-    const monthOnly = form.elements.datePrecision.value === 'month';
+    const precision = form.elements.datePrecision.value;
+    const monthOnly = precision === 'month';
+    const unknown = precision === 'unknown';
     form.elements.date.type = monthOnly ? 'month' : 'date';
-    form.elements.flightNumber.required = !monthOnly;
-    form.querySelectorAll('[data-exact-date-field]').forEach((field) => field.hidden = monthOnly);
+    form.elements.date.required = !unknown;
+    form.querySelector('[data-flight-date-field]').hidden = unknown;
+    form.elements.flightNumber.required = precision === 'day';
+    form.querySelectorAll('[data-exact-date-field]').forEach((field) => field.hidden = precision !== 'day');
   };
   form.elements.datePrecision.addEventListener('change', () => {
     form.elements.date.value = '';
@@ -182,7 +186,7 @@ const [flights, trips] = await Promise.all([listFlights(), listTrips(true)]);
     }
     const datePrecision = String(data.get('datePrecision'));
     const rawDate = String(data.get('date'));
-    const date = datePrecision === 'month' ? `${rawDate}-01` : rawDate;
+    const date = datePrecision === 'unknown' ? '' : datePrecision === 'month' ? `${rawDate}-01` : rawDate;
     const body = {
       id: data.get('id') || undefined,
       date,
@@ -216,7 +220,7 @@ const [flights, trips] = await Promise.all([listFlights(), listTrips(true)]);
     form.elements.id.value = flight.id;
     form.elements.datePrecision.value = flight.datePrecision ?? 'day';
     syncDatePrecision();
-    form.elements.date.value = flight.datePrecision === 'month' ? flight.date.slice(0, 7) : flight.date;
+    form.elements.date.value = flight.datePrecision === 'unknown' ? '' : flight.datePrecision === 'month' ? flight.date.slice(0, 7) : flight.date;
     form.elements.flightNumber.value = flight.flightNumber;
     form.elements.airlineName.value = flight.airlineName ?? '';
     form.elements.departureTime.value = flight.scheduledDeparture?.slice(11, 16) ?? '';

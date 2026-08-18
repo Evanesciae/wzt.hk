@@ -91,7 +91,7 @@ function rowToFlight(row: Row): Flight {
   return {
     id: String(row.id),
     date: String(row.date),
-    datePrecision: row.date_precision === 'month' ? 'month' : 'day',
+    datePrecision: row.date_precision === 'unknown' ? 'unknown' : row.date_precision === 'month' ? 'month' : 'day',
     flightNumber: String(row.flight_number),
     airlineCode: row.airline_code ? String(row.airline_code) : undefined,
     airlineName: row.airline_name ? String(row.airline_name) : undefined,
@@ -142,7 +142,9 @@ const flightSelect = `SELECT f.*,
 export type FlightInput = Omit<Flight, 'id' | 'createdAt' | 'updatedAt'> & { id?: string };
 
 export async function listFlights() {
-  return (await all(`${flightSelect} ORDER BY f.date DESC, f.scheduled_departure DESC, f.flight_number`)).map(rowToFlight);
+  return (await all(`${flightSelect}
+    ORDER BY CASE WHEN f.date_precision='unknown' THEN 1 ELSE 0 END,
+      f.date DESC, f.scheduled_departure DESC, f.flight_number, f.id`)).map(rowToFlight);
 }
 
 export async function getFlight(id: string) {

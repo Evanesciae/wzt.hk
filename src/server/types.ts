@@ -15,7 +15,7 @@ export interface Airport {
 export interface Flight {
   id: string;
   date: string;
-  datePrecision?: 'day' | 'month';
+  datePrecision?: 'day' | 'month' | 'unknown';
   flightNumber: string;
   airlineCode?: string;
   airlineName?: string;

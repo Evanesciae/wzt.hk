@@ -23,7 +23,9 @@ const routeCounts = flights.reduce((map, flight) => {
   map.set(route, (map.get(route) ?? 0) + 1);
   return map;
 }, new Map<string, number>());
-const years = flights.map((flight) => Number(flight.date.slice(0, 4))).filter(Number.isFinite);
+const datedFlights = flights.filter((flight) => flight.datePrecision !== 'unknown');
+const unknownFlights = flights.filter((flight) => flight.datePrecision === 'unknown');
+const years = datedFlights.map((flight) => Number(flight.date.slice(0, 4))).filter(Number.isFinite);
 const yearOptions = [...new Set(years)].sort((a, b) => b - a);
 const airlineOptions = [...airlineCounts.keys()].sort((a, b) => a.localeCompare(b, 'zh-CN'));
 const airportCounts = flights.reduce((map, flight) => {
@@ -35,7 +37,10 @@ const airportCounts = flights.reduce((map, flight) => {
 }, new Map<string, { label: string; count: number }>());
 const airportOptions = [...airportCounts.entries()].sort((a, b) => a[1].label.localeCompare(b[1].label, 'zh-CN'));
 const routeOptions = [...routeCounts.keys()].sort();
-const flightsByYear = yearOptions.map((year) => ({ year, flights: flights.filter((flight) => Number(flight.date.slice(0, 4)) === year) }));
+const flightsByYear = [
+  ...yearOptions.map((year) => ({ key: String(year), label: String(year), flights: datedFlights.filter((flight) => Number(flight.date.slice(0, 4)) === year) })),
+  ...(unknownFlights.length > 0 ? [{ key: 'unknown', label: '日期不详', flights: unknownFlights }] : []),
+];
 
 function time(value?: string) {
   return value ? value.slice(11, 16) : '—';
@@ -69,18 +74,18 @@ function duration(minutes?: number) {
     <section class="flight-log-section">
       <div class="section-heading trip-section-heading"><div><p class="eyebrow">FLIGHTS</p><h2>航班记录</h2></div><span class="flight-result-count" data-flight-count>{flights.length} 条</span></div>
       <div class="flight-filter-panel" data-flight-filters>
-        <label>年份<select data-flight-year><option value="all">全部年份</option>{yearOptions.map((year) => <option value={year}>{year}</option>)}</select></label>
+        <label>年份<select data-flight-year><option value="all">全部年份</option>{yearOptions.map((year) => <option value={year}>{year}</option>)}{unknownFlights.length > 0 && <option value="unknown">日期不详</option>}</select></label>
         <label>航司<select data-flight-airline><option value="all">全部航司</option>{airlineOptions.map((airline) => <option value={airline}>{airline}</option>)}</select></label>
         <label>机场<select data-flight-airport><option value="all">全部机场</option>{airportOptions.map(([code, info]) => <option value={code}>{info.label}</option>)}</select></label>
         <label>航线<select data-flight-route><option value="all">全部航线</option>{routeOptions.map((route) => <option value={route}>{route}</option>)}</select></label>
       </div>
       <div class="flight-list" data-flight-list>
-        {flightsByYear.map((group) => <section class="flight-year-group" data-flight-year-group={group.year}>
-          <h3>{group.year}<span>{group.flights.length} 段</span></h3>
+        {flightsByYear.map((group) => <section class="flight-year-group" data-flight-year-group={group.key}>
+          <h3>{group.label}<span>{group.flights.length} 段</span></h3>
           {group.flights.map((flight) => {
             const airline = flight.airlineName ?? flight.airlineCode ?? '未记录';
             const route = [flight.fromAirport.code, flight.toAirport.code].sort().join(' ↔ ');
-            return <a class="flight-row" href={`/travel/flights/${flight.id}/`} data-flight-row data-year={flight.date.slice(0, 4)} data-airline={airline} data-airports={`${flight.fromAirport.code} ${flight.toAirport.code}`} data-route={route}>
+            return <a class="flight-row" href={`/travel/flights/${flight.id}/`} data-flight-row data-year={flight.datePrecision === 'unknown' ? 'unknown' : flight.date.slice(0, 4)} data-airline={airline} data-airports={`${flight.fromAirport.code} ${flight.toAirport.code}`} data-route={route}>
               <time datetime={flight.date}>{formatFlightDate(flight.date, flight.datePrecision)}</time>
               <div><strong>{flight.fromAirport.city} {flight.fromAirport.code} → {flight.toAirport.city} {flight.toAirport.code}</strong><span>{flight.flightNumber || '航班待确认'} · {airline}</span></div>
               <div><span>{time(flight.scheduledDeparture)} → {time(flight.scheduledArrival)}</span><span>{duration(flight.durationMinutes)} · {flight.distanceKm ? `${flight.distanceKm} km` : '—'}</span></div>
