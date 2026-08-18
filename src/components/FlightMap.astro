@@ -344,7 +344,6 @@ const hasJourneys = routes.length > 0 || surfaceRoutes.length > 0;
       center: overviewCenter,
       zoom: overviewZoomForWidth(),
       pitch: 12,
-      cooperativeGestures: true,
       renderWorldCopies: false,
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: true }), 'top-right');
@@ -357,17 +356,49 @@ const hasJourneys = routes.length > 0 || surfaceRoutes.length > 0;
       duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 900,
     });
     homeButton?.addEventListener('click', showGlobe);
+    const fallbackFullscreenClass = 'is-map-expanded';
+    const syncFullscreenState = () => {
+      const expanded = document.fullscreenElement === root || root.classList.contains(fallbackFullscreenClass);
+      if (fullscreenButton) fullscreenButton.textContent = expanded ? '退出全屏' : '全屏';
+      setTimeout(() => map.resize(), 80);
+    };
+    const enterFallbackFullscreen = () => {
+      root.classList.add(fallbackFullscreenClass);
+      document.documentElement.classList.add('has-map-expanded');
+      syncFullscreenState();
+      setTimeout(() => map.resize(), 320);
+    };
+    const exitFallbackFullscreen = () => {
+      root.classList.remove(fallbackFullscreenClass);
+      document.documentElement.classList.remove('has-map-expanded');
+      syncFullscreenState();
+    };
     fullscreenButton?.addEventListener('click', async () => {
+      if (root.classList.contains(fallbackFullscreenClass)) {
+        exitFallbackFullscreen();
+        return;
+      }
       if (document.fullscreenElement === root) {
         await document.exitFullscreen();
-      } else {
-        await root.requestFullscreen();
+        return;
       }
-      setTimeout(() => map.resize(), 80);
+      const useFallback = window.matchMedia('(max-width: 900px)').matches || typeof root.requestFullscreen !== 'function';
+      if (useFallback) {
+        enterFallbackFullscreen();
+        return;
+      }
+      try {
+        await root.requestFullscreen();
+      } catch {
+        enterFallbackFullscreen();
+      }
     });
-    document.addEventListener('fullscreenchange', () => {
-      fullscreenButton && (fullscreenButton.textContent = document.fullscreenElement === root ? '退出全屏' : '全屏');
-      map.resize();
+    document.addEventListener('fullscreenchange', syncFullscreenState);
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && root.classList.contains(fallbackFullscreenClass)) exitFallbackFullscreen();
+    });
+    window.addEventListener('pagehide', () => {
+      if (root.classList.contains(fallbackFullscreenClass)) exitFallbackFullscreen();
     });
 
     const groupedRoutes = groupRoutes(routes);
