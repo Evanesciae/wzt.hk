@@ -3,14 +3,27 @@ import { adminAuthDisabled, getSession, validCsrf, validOrigin } from './server/
 
 export const onRequest = defineMiddleware(async (context, next) => {
   const path = context.url.pathname;
+  const nextWithPageCachePolicy = async () => {
+    const response = await next();
+    if (!path.startsWith('/travel/flights')) return response;
+    const headers = new Headers(response.headers);
+    headers.set('Cache-Control', 'no-store, max-age=0');
+    headers.set('CDN-Cache-Control', 'no-store');
+    headers.set('Cloudflare-CDN-Cache-Control', 'no-store');
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  };
   if (context.url.hostname === 'paste.wzt.hk' && path === '/') {
     return context.rewrite('/pasteboard');
   }
   const isAdminPage = path.startsWith('/admin') && path !== '/admin/login';
   const isAdminApi = path.startsWith('/api/admin');
   const isLoginApi = path === '/api/admin/login';
-  if (!isAdminPage && !isAdminApi) return next();
-  if (adminAuthDisabled()) return next();
+  if (!isAdminPage && !isAdminApi) return nextWithPageCachePolicy();
+  if (adminAuthDisabled()) return nextWithPageCachePolicy();
 
   const session = await getSession(context.cookies);
   if (session) context.locals.adminSession = session;
@@ -24,5 +37,5 @@ export const onRequest = defineMiddleware(async (context, next) => {
       return Response.json({ error: 'INVALID_CSRF' }, { status: 403 });
     }
   }
-  return next();
+  return nextWithPageCachePolicy();
 });
