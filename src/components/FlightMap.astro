@@ -346,6 +346,16 @@ const hasJourneys = routes.length > 0 || surfaceRoutes.length > 0;
       pitch: 12,
       renderWorldCopies: false,
     });
+    // Keep iOS Safari from interpreting a map pinch as persistent page zoom.
+    // MapLibre still receives the touch events and handles the map gesture.
+    const preventPageGesture = (event: Event) => event.preventDefault();
+    const preventMultiTouchPageGesture = (event: TouchEvent) => {
+      if (event.touches.length > 1) event.preventDefault();
+    };
+    root.addEventListener('gesturestart', preventPageGesture, { passive: false });
+    root.addEventListener('gesturechange', preventPageGesture, { passive: false });
+    root.addEventListener('gestureend', preventPageGesture, { passive: false });
+    root.addEventListener('touchmove', preventMultiTouchPageGesture, { passive: false });
     map.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: true }), 'top-right');
 
     const showGlobe = () => map.easeTo({
