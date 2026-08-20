@@ -27,10 +27,27 @@ const adminSession = Astro.locals.adminSession;
     <meta charset="UTF-8" />
     <meta
       name="viewport"
-      content={lockViewportScale
-        ? 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover'
-        : 'width=device-width, initial-scale=1, viewport-fit=cover'}
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
     />
+    {lockViewportScale && <script is:inline>
+      (() => {
+        const viewport = document.querySelector('meta[name="viewport"]');
+        if (!viewport) return;
+        const normal = 'width=device-width, initial-scale=1, viewport-fit=cover';
+        const flat = 'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, viewport-fit=cover';
+        let restoreTimer;
+        const restoreScale = () => {
+          clearTimeout(restoreTimer);
+          viewport.setAttribute('content', flat);
+          restoreTimer = setTimeout(() => viewport.setAttribute('content', normal), 120);
+        };
+        restoreScale();
+        addEventListener('pageshow', restoreScale);
+        document.addEventListener('visibilitychange', () => {
+          if (!document.hidden) restoreScale();
+        });
+      })();
+    </script>}
     <meta name="generator" content={Astro.generator} />
     <meta name="description" content={description} />
     <meta name="theme-color" content="#ffffff" />
