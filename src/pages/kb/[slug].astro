@@ -1,5 +1,5 @@
 ---
-import { marked } from 'marked';
+import { Marked } from 'marked';
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import { categoryTitle, formatDate } from '../../lib/content';
 import { getKbNote } from '../../server/database';
@@ -8,7 +8,44 @@ const slug = Astro.params.slug;
 const note = slug ? await getKbNote(slug) : undefined;
 if (!note) return Astro.redirect('/404');
 const date = (value: string) => new Date(`${value}T00:00:00`);
-const bodyHtml = note.body ? marked.parse(note.body) : '';
+
+type TocItem = {
+  depth: number;
+  id: string;
+  label: string;
+};
+
+const tocItems: TocItem[] = [];
+const headingCounts = new Map<string, number>();
+
+function headingId(label: string) {
+  const base = label
+    .normalize('NFKC')
+    .toLocaleLowerCase('zh-CN')
+    .replace(/[^\p{Letter}\p{Number}]+/gu, '-')
+    .replace(/^-+|-+$/g, '') || 'section';
+  const count = (headingCounts.get(base) ?? 0) + 1;
+  headingCounts.set(base, count);
+  return count === 1 ? base : `${base}-${count}`;
+}
+
+const markdown = new Marked({
+  renderer: {
+    heading({ tokens, depth, text }) {
+      const html = this.parser.parseInline(tokens);
+      if (depth !== 2 && depth !== 3) return `<h${depth}>${html}</h${depth}>`;
+
+      const label = text
+        .replace(/<[^>]*>/g, '')
+        .replace(/[*_`~[\]]/g, '')
+        .trim();
+      const id = headingId(label);
+      tocItems.push({ depth, id, label });
+      return `<h${depth} id="${id}">${html}</h${depth}>`;
+    },
+  },
+});
+const bodyHtml = note.body ? await markdown.parse(note.body) : '';
 ---
 
 <BaseLayout title={note.title} description={note.summary}>
@@ -26,6 +63,52 @@ const bodyHtml = note.body ? marked.parse(note.body) : '';
         {note.tags.map((tag) => <span class="tag">{tag}</span>)}
       </div>
     </header>
-    <article class="prose" set:html={bodyHtml} />
+    <div class="article-layout">
+      {tocItems.length > 0 && (
+        <aside class="article-toc" data-article-toc aria-label="文章目录">
+          <p>目录</p>
+          <nav>
+            <ol>
+              {tocItems.map((item) => (
+                <li class:list={[`article-toc-depth-${item.depth}`]}>
+                  <a href={`#${item.id}`}>{item.label}</a>
+                </li>
+              ))}
+            </ol>
+          </nav>
+        </aside>
+      )}
+      <article class="prose" set:html={bodyHtml} />
+    </div>
   </div>
 </BaseLayout>
+
+<script>
+  const toc = document.querySelector<HTMLElement>('[data-article-toc]');
+  const links = Array.from(toc?.querySelectorAll<HTMLAnchorElement>('a[href^="#"]') ?? []);
+  const headings = links
+    .map((link) => document.getElementById(decodeURIComponent(link.hash.slice(1))))
+    .filter((heading): heading is HTMLElement => Boolean(heading));
+
+  let frame = 0;
+  function updateActiveHeading() {
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(() => {
+      const active = headings.reduce<HTMLElement | undefined>((current, heading) => (
+        heading.getBoundingClientRect().top <= 200 ? heading : current
+      ), headings[0]);
+
+      links.forEach((link) => {
+        const current = active && decodeURIComponent(link.hash.slice(1)) === active.id;
+        if (current) link.setAttribute('aria-current', 'location');
+        else link.removeAttribute('aria-current');
+      });
+    });
+  }
+
+  if (links.length > 0) {
+    updateActiveHeading();
+    addEventListener('scroll', updateActiveHeading, { passive: true });
+    addEventListener('hashchange', updateActiveHeading);
+  }
+</script>
