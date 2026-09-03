@@ -1,0 +1,129 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { listMemes, memeUrl } from '../../server/memes';
+
+const memes = await listMemes();
+---
+
+<BaseLayout title="表情包管理">
+  <div class="container page-shell">
+    <header class="admin-heading">
+      <div>
+        <p class="eyebrow">MEMES</p>
+        <h1>表情包管理</h1>
+        <p class="admin-heading-description">上传、标注和删除表情包，前台见 <a href="/memes">表情包画廊</a>。</p>
+      </div>
+      <div class="admin-heading-actions">
+        <span class="meme-upload-hint" data-upload-hint></span>
+      </div>
+    </header>
+
+    <section class="meme-upload-zone" data-upload-zone aria-label="上传表情包">
+      <p>拖拽图片到这里，或</p>
+      <label class="primary-button meme-upload-button">
+        选择文件（可多选，单次最多 30 个）
+        <input type="file" accept="image/gif,image/png,image/webp,image/jpeg" multiple hidden data-file-input />
+      </label>
+      <label class="meme-series-field">所属系列（可选，同一套表情填同一名，如：熊猫头）<input type="text" maxlength="30" placeholder="留空则为散图" data-default-series /></label>
+    </section>
+
+    <section aria-label="表情包列表">
+      <div class="meme-admin-grid" data-meme-list>
+        {memes.map((meme) => (
+          <div class="meme-admin-card" data-id={meme.id}>
+            <img src={memeUrl(meme)} alt={meme.title || '表情包'} loading="lazy" decoding="async" />
+            <div class="meme-admin-fields">
+              <input type="text" value={meme.title} maxlength="100" placeholder="名称" aria-label="名称" data-title />
+              <input type="text" value={meme.series} maxlength="30" placeholder="系列，留空为散图" aria-label="系列" data-series />
+            </div>
+            <div class="meme-admin-actions">
+              <button type="button" class="meme-button" data-save>保存</button>
+              <button type="button" class="text-button" data-delete>删除</button>
+            </div>
+          </div>
+        ))}
+      </div>
+      {memes.length === 0 && <p class="admin-empty-state">还没有表情包。</p>}
+    </section>
+  </div>
+
+  <div class="meme-toast" data-toast role="status" aria-live="polite"></div>
+
+  <script>
+    // @ts-nocheck
+    const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '';
+    const api = (url, options = {}) => fetch(url, { ...options, headers: { ...(options.headers || {}), 'x-csrf-token': csrf } });
+    const zone = document.querySelector('[data-upload-zone]');
+    const fileInput = document.querySelector('[data-file-input]');
+    const defaultSeries = document.querySelector('[data-default-series]');
+    const hint = document.querySelector('[data-upload-hint]');
+    const list = document.querySelector('[data-meme-list]');
+    const toast = document.querySelector('[data-toast]');
+    let toastTimer;
+
+    function showToast(message) {
+      toast.textContent = message;
+      toast.classList.add('is-visible');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('is-visible'), 2400);
+    }
+
+    async function uploadFiles(files) {
+      const valid = [...files].filter((file) => file.size > 0);
+      if (valid.length === 0) return;
+      // ponytail: API caps 30 files per request; batch client-side instead of raising the cap
+      for (let offset = 0; offset < valid.length; offset += 30) {
+        const form = new FormData();
+        for (const file of valid.slice(offset, offset + 30)) form.append('files', file);
+        if (defaultSeries?.value.trim()) form.append('series', defaultSeries.value);
+        hint.textContent = `上传中 ${Math.min(offset + 30, valid.length)}/${valid.length}…`;
+        try {
+          const response = await api('/api/admin/memes', { method: 'POST', body: form });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || 'UPLOAD_FAILED');
+          if (data.errors?.length) showToast(`已上传 ${data.uploaded.length} 个，${data.errors.length} 个失败：${data.errors[0].fileName} ${data.errors[0].error}`);
+          else showToast(`已上传 ${data.uploaded.length} 个表情包`);
+        } catch (error) {
+          showToast(`上传失败：${error.message}`);
+        }
+      }
+      hint.textContent = '';
+      setTimeout(() => window.location.reload(), 600);
+    }
+
+    fileInput?.addEventListener('change', () => {
+      if (fileInput.files?.length) uploadFiles(fileInput.files);
+      fileInput.value = '';
+    });
+
+    zone?.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      zone.classList.add('is-dragging');
+    });
+    zone?.addEventListener('dragleave', () => zone.classList.remove('is-dragging'));
+    zone?.addEventListener('drop', (event) => {
+      event.preventDefault();
+      zone.classList.remove('is-dragging');
+      if (event.dataTransfer?.files?.length) uploadFiles(event.dataTransfer.files);
+    });
+
+    list?.addEventListener('click', async (event) => {
+      const card = event.target.closest('[data-id]');
+      if (!card) return;
+      if (event.target.matches('[data-save]')) {
+        const body = JSON.stringify({
+          title: card.querySelector('[data-title]').value,
+          series: card.querySelector('[data-series]').value.trim(),
+        });
+        const response = await api(`/api/admin/memes/${card.dataset.id}`, { method: 'PATCH', body, headers: { 'content-type': 'application/json' } });
+        showToast(response.ok ? '已保存' : '保存失败');
+      }
+      if (event.target.matches('[data-delete]')) {
+        if (!confirm('删除这个表情包？')) return;
+        const response = await api(`/api/admin/memes/${card.dataset.id}`, { method: 'DELETE' });
+        if (response.ok) card.remove();
+        showToast(response.ok ? '已删除' : '删除失败');
+      }
+    });
+  </script>
+</BaseLayout>

@@ -35,6 +35,11 @@ const trips = await listTrips(true);
         <span><strong>机场资料</strong><small>管理机场代码与位置</small></span>
         <span class="admin-module-arrow" aria-hidden="true">→</span>
       </a>
+      <a class="admin-module-card" href="/admin/memes">
+        <span class="admin-module-icon" aria-hidden="true">梗</span>
+        <span><strong>表情包</strong><small>上传与管理 meme.wzt.hk 表情包</small></span>
+        <span class="admin-module-arrow" aria-hidden="true">→</span>
+      </a>
     </nav>
 
     <section class="admin-content-section">
@@ -67,7 +72,7 @@ const trips = await listTrips(true);
         <label class="full">网址标识（英文/数字/连字符，用于 URL）<input name="id" required maxlength="80" placeholder="例如 taiwan-2024" /></label>
         <label class="full">标题<input name="title" required maxlength="120" /></label>
         <label>目的地<input name="destination" required /></label>
-        <label>状态<select name="status"><option value="planning">计划中</option><option value="upcoming">即将出发</option><option value="archived">已归档</option></select></label>
+        <label>状态<select name="status"><option value="planning">待定</option><option value="upcoming">即将出发</option><option value="archived">已归档</option></select></label>
         <label class="full form-check-inline"><input name="datesTbd" type="checkbox" /><span>日期待定（只按 Day 顺序规划）</span></label>
         <label data-trip-date-field>开始日期<input name="startDate" type="date" required /></label>
         <label data-trip-date-field>结束日期<input name="endDate" type="date" required /></label>

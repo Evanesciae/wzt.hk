@@ -8,6 +8,9 @@
     "binding": "ASSETS",
     "directory": "./dist"
   },
+  "routes": [
+    { "pattern": "meme.wzt.hk", "custom_domain": true }
+  ],
   "cache": {
     "enabled": true
   },

@@ -19,6 +19,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
   if (context.url.hostname === 'paste.wzt.hk' && path === '/') {
     return context.rewrite('/pasteboard');
   }
+  if (context.url.hostname === 'meme.wzt.hk' && path === '/') {
+    return context.rewrite('/memes');
+  }
   const isAdminPage = path.startsWith('/admin') && path !== '/admin/login';
   const isAdminApi = path.startsWith('/api/admin');
   const isLoginApi = path === '/api/admin/login';

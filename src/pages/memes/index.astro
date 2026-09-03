@@ -1,0 +1,171 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PageHeader from '../../components/PageHeader.astro';
+import { getSession } from '../../server/auth';
+import { listMemes, memeUrl } from '../../server/memes';
+
+const memes = await listMemes();
+const isAdmin = Boolean(await getSession(Astro.cookies));
+const seriesCounts = new Map<string, number>();
+for (const meme of memes) {
+  seriesCounts.set(meme.series, (seriesCounts.get(meme.series) ?? 0) + 1);
+}
+// '' means loose images; show series (by count) first, loose images last
+const seriesList = [...seriesCounts.entries()]
+  .filter(([series]) => series !== '')
+  .sort((a, b) => b[1] - a[1])
+  .map(([series]) => series);
+---
+
+<BaseLayout title="表情包" description="表情包仓库，点图复制。" brandHref="https://wzt.hk">
+  <div class="container page-shell">
+    <PageHeader eyebrow="MEMES" title="表情包" description="点图片放大，一键复制。" count={memes.length} />
+
+    <div class="filter-bar" data-filter-root>
+      <label class="search-field">
+        <span aria-hidden="true">⌕</span>
+        <input type="search" placeholder="搜索名称或系列…" aria-label="搜索表情包" data-search-input />
+      </label>
+      <div class="filter-tabs" aria-label="按系列筛选">
+        <button class="filter-button is-active" type="button" data-filter="all">全部</button>
+        {seriesList.map((series) => (
+          <button class="filter-button" type="button" data-filter={series}>{series}</button>
+        ))}
+        {seriesCounts.has('') && <button class="filter-button" type="button" data-filter="__loose__">散图</button>}
+      </div>
+      {isAdmin && <a class="filter-button" href="/admin/memes">上传管理</a>}
+    </div>
+
+    {memes.length === 0
+      ? <p class="filter-empty">还没有表情包，去 <a href="/admin/memes">管理页</a> 上传。</p>
+      : (
+        <div class="meme-grid" data-filter-list>
+          {memes.map((meme) => (
+            <button
+              class="meme-item filter-item"
+              type="button"
+              data-id={meme.id}
+              data-url={memeUrl(meme)}
+              data-title={meme.title}
+              data-series={meme.series || '__loose__'}
+              data-search={`${meme.title} ${meme.series}`.toLowerCase()}
+            >
+              <img src={memeUrl(meme)} alt={meme.title || '表情包'} loading="lazy" decoding="async" />
+            </button>
+          ))}
+        </div>
+      )}
+    <p class="filter-empty" data-filter-empty hidden>没有找到匹配的表情包。</p>
+  </div>
+
+  <dialog class="meme-dialog" data-meme-dialog>
+    <figure>
+      <img data-meme-dialog-image src="" alt="" />
+      <figcaption data-meme-dialog-title></figcaption>
+    </figure>
+    <div class="meme-dialog-actions">
+      <button class="meme-button" type="button" data-copy-image>复制图片</button>
+      <button class="text-button" type="button" data-copy-link>复制链接</button>
+      <button class="text-button" type="button" data-close-dialog>关闭</button>
+    </div>
+  </dialog>
+
+  <div class="meme-toast" data-toast role="status" aria-live="polite"></div>
+</BaseLayout>
+
+<script>
+  const root = document.querySelector<HTMLElement>('[data-filter-root]');
+  const input = root?.querySelector<HTMLInputElement>('[data-search-input]');
+  const buttons = root?.querySelectorAll<HTMLButtonElement>('[data-filter]');
+  const items = document.querySelectorAll<HTMLElement>('[data-filter-list] .filter-item');
+  const empty = document.querySelector<HTMLElement>('[data-filter-empty]');
+  const dialog = document.querySelector<HTMLDialogElement>('[data-meme-dialog]');
+  const dialogImage = dialog?.querySelector<HTMLImageElement>('[data-meme-dialog-image]');
+  const dialogTitle = dialog?.querySelector<HTMLElement>('[data-meme-dialog-title]');
+  const toast = document.querySelector<HTMLElement>('[data-toast]');
+  let series = 'all';
+  let toastTimer: ReturnType<typeof setTimeout>;
+
+  function showToast(message: string) {
+    if (!toast) return;
+    toast.textContent = message;
+    toast.classList.add('is-visible');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('is-visible'), 2400);
+  }
+
+  function applyFilter() {
+    const query = input?.value.trim().toLowerCase() ?? '';
+    let visible = 0;
+    items.forEach((item) => {
+      const seriesMatch = series === 'all' || item.dataset.series === series;
+      const searchMatch = !query || item.dataset.search?.includes(query);
+      item.hidden = !(seriesMatch && searchMatch);
+      if (!item.hidden) visible += 1;
+    });
+    if (empty) empty.hidden = visible !== 0;
+  }
+
+  input?.addEventListener('input', applyFilter);
+  buttons?.forEach((button) => button.addEventListener('click', () => {
+    series = button.dataset.filter ?? 'all';
+    buttons.forEach((item) => item.classList.toggle('is-active', item === button));
+    applyFilter();
+  }));
+
+  async function copyImage(url: string) {
+    try {
+      const blob = await (await fetch(url)).blob();
+      // ponytail: browsers only accept native types (gif/webp) on some builds; PNG canvas is the portable fallback
+      if (blob.type !== 'image/png') {
+        try {
+          await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+          return showToast('已复制图片');
+        } catch { /* fall through to PNG conversion */ }
+        const bitmap = await createImageBitmap(blob);
+        const canvas = document.createElement('canvas');
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        canvas.getContext('2d')!.drawImage(bitmap, 0, 0);
+        const png = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+        if (png) {
+          await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+          return showToast('已复制图片（动图转为静态图）');
+        }
+      }
+      await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+      showToast('已复制图片');
+    } catch {
+      showToast('复制失败，请右键图片另存');
+    }
+  }
+
+  async function copyLink(url: string) {
+    try {
+      await navigator.clipboard.writeText(new URL(url, location.origin).toString());
+      showToast('已复制链接');
+    } catch {
+      showToast('复制链接失败');
+    }
+  }
+
+  items.forEach((item) => item.addEventListener('click', () => {
+    const url = item.dataset.url ?? '';
+    if (dialog && dialogImage) {
+      dialogImage.src = url;
+      dialogImage.alt = item.dataset.title || '表情包';
+      if (dialogTitle) dialogTitle.textContent = item.dataset.title || '';
+      dialog.showModal();
+      dialog.dataset.url = url;
+    } else {
+      window.open(url, '_blank');
+    }
+  }));
+
+  dialog?.querySelector('[data-copy-image]')?.addEventListener('click', () => copyImage(dialog.dataset.url ?? ''));
+  dialog?.querySelector('[data-copy-link]')?.addEventListener('click', () => copyLink(dialog.dataset.url ?? ''));
+  dialog?.querySelector('[data-close-dialog]')?.addEventListener('click', () => dialog.close());
+  dialog?.addEventListener('click', (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+</script>

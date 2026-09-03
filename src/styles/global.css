@@ -223,6 +223,7 @@ button, input { font: inherit; }
 .prose h2 { margin: 2.5em 0 .75em; scroll-margin-top: 94px; font-size: 23px; letter-spacing: -.025em; line-height: 1.35; }
 .prose h3 { margin: 2em 0 .6em; scroll-margin-top: 94px; font-size: 18px; }
 .prose p { margin: 1.1em 0; }
+.prose img { display: block; max-width: 100%; height: auto; margin: 1.5em auto; }
 .prose a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
 .prose strong { font-weight: 650; }
 .prose ul, .prose ol { padding-left: 1.4em; }
@@ -897,3 +898,36 @@ html.has-map-expanded, html.has-map-expanded body { overflow: hidden; overscroll
 :root[data-theme="dark"] .journey-map-legend .is-transit { background: rgb(127 166 189 / 86%); }
 :root[data-theme="dark"] .journey-map-legend .is-drive { background: rgb(113 148 135 / 68%); }
 :root[data-theme="dark"] .flight-map-frame .maplibregl-ctrl-attrib { background: rgb(5 13 21 / 62%); color: #8098a6; }
+
+/* Memes gallery & admin (meme.wzt.hk) */
+.meme-grid { columns: 7 120px; column-gap: 10px; }
+.meme-item { display: block; width: 100%; margin: 0 0 10px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-soft); overflow: hidden; cursor: zoom-in; }
+.meme-item img { display: block; width: 100%; height: auto; }
+.meme-item:hover { border-color: var(--line-strong); box-shadow: var(--shadow); }
+
+.meme-button { padding: 7px 14px; border: 0; border-radius: 6px; background: var(--text); color: var(--bg); font-size: 13px; cursor: pointer; }
+.meme-button:hover { opacity: .88; }
+
+.meme-dialog { width: min(560px, calc(100vw - 32px)); padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); box-shadow: var(--shadow); }
+.meme-dialog::backdrop { background: rgb(0 0 0 / 55%); }
+.meme-dialog figure { margin: 0; text-align: center; }
+.meme-dialog img { max-width: 100%; max-height: 62vh; }
+.meme-dialog figcaption { margin-top: 8px; color: var(--text-2); font-size: 13px; word-break: break-all; }
+.meme-dialog-actions { display: flex; justify-content: center; gap: 8px; margin-top: 14px; }
+
+.meme-toast { position: fixed; z-index: 40; left: 50%; bottom: 24px; transform: translate(-50%, 10px); padding: 8px 12px; border-radius: 6px; background: var(--text); color: var(--bg); font-size: 12px; opacity: 0; pointer-events: none; transition: .18s ease; box-shadow: var(--shadow); }
+.meme-toast.is-visible { opacity: 1; transform: translate(-50%, 0); }
+
+.meme-upload-zone { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-bottom: 28px; padding: 32px 20px; border: 1px dashed var(--line-strong); border-radius: var(--radius); background: var(--bg-soft); text-align: center; color: var(--text-2); }
+.meme-upload-zone.is-dragging { border-color: var(--accent); background: var(--accent-soft); }
+.meme-upload-button { margin-top: 0; cursor: pointer; }
+.meme-series-field { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.meme-series-field input { padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); color: var(--text); }
+.meme-upload-hint { font-size: 13px; color: var(--text-3); }
+
+.meme-admin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+.meme-admin-card { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); }
+.meme-admin-card img { width: 100%; height: 120px; object-fit: contain; border-radius: 6px; background: var(--bg-soft); }
+.meme-admin-fields { display: flex; flex-direction: column; gap: 6px; }
+.meme-admin-fields input { width: 100%; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font-size: 13px; }
+.meme-admin-actions { display: flex; justify-content: space-between; align-items: center; }
