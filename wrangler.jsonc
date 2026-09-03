@@ -9,8 +9,11 @@
     "directory": "./dist"
   },
   "routes": [
+    { "pattern": "wzt.hk", "custom_domain": true },
     { "pattern": "meme.wzt.hk", "custom_domain": true }
   ],
+  "workers_dev": true,
+  "preview_urls": true,
   "cache": {
     "enabled": true
   },
