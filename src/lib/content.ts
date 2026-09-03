@@ -8,7 +8,7 @@ export function categoryTitle(slug: string) {
 
 export const travelStatus = {
   upcoming: '即将出发',
-  planning: '计划中',
+  planning: '待定',
   archived: '已归档',
 } as const;
 

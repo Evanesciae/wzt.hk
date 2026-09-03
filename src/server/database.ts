@@ -268,7 +268,7 @@ function rowToKbNote(row: Row): KbNote {
 }
 
 export async function listKbNotes(includeDrafts = false): Promise<KbNote[]> {
-  const rows = await all(`SELECT * FROM kb_notes ${includeDrafts ? '' : 'WHERE draft = 0'} ORDER BY updated_at DESC`);
+  const rows = await all(`SELECT * FROM kb_notes ${includeDrafts ? '' : 'WHERE draft = 0'} ORDER BY created_at DESC, updated_at DESC, id`);
   return rows.map(rowToKbNote);
 }
 
@@ -423,7 +423,12 @@ export async function listTrips(includeDrafts = false): Promise<TravelTrip[]> {
   const [rows, previewRows] = await Promise.all([
     all(
       `SELECT * FROM trips ${includeDrafts ? '' : 'WHERE draft = 0'}
-       ORDER BY featured DESC, dates_tbd DESC, start_date DESC, updated_at DESC`,
+       ORDER BY CASE status WHEN 'upcoming' THEN 0 WHEN 'planning' THEN 1 ELSE 2 END,
+         featured DESC,
+         CASE WHEN status = 'upcoming' AND start_date IS NULL THEN 1 ELSE 0 END,
+         CASE WHEN status = 'upcoming' THEN start_date END ASC,
+         CASE WHEN status != 'upcoming' THEN start_date END DESC,
+         dates_tbd DESC, updated_at DESC`,
     ),
     all(
       `SELECT * FROM (

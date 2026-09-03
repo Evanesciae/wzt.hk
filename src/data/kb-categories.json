@@ -1,7 +1,5 @@
 [
   { "slug": "development", "title": "开发", "description": "代码、工具与工程实践" },
-  { "slug": "product", "title": "产品", "description": "产品思考、设计与方法" },
-  { "slug": "ai-video", "title": "AI 视频", "description": "AI 视频制作、提示词、角色资产与分镜流程" },
-  { "slug": "life", "title": "生活", "description": "日常记录与个人观察" },
-  { "slug": "reference", "title": "资料", "description": "值得反复查阅的参考内容" }
+  { "slug": "ai-video", "title": "AI 视频", "description": "AI 视频生成、提示词、角色资产与分镜流程" },
+  { "slug": "editing", "title": "剪辑", "description": "剪辑、节奏、声音与后期处理" }
 ]

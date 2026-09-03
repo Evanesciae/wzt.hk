@@ -17,7 +17,7 @@ const date = (value: string) => new Date(`${value}T00:00:00`);
     <a class="text-link category-link" href={`/kb/category/${note.category}/`}>
       {categoryTitle(note.category)}
     </a>
-    <time datetime={note.updatedAt}>{formatDate(date(note.updatedAt))}</time>
+    <time datetime={note.createdAt}>{formatDate(date(note.createdAt))}</time>
   </div>
   <h2>{note.title}</h2>
   <p>{note.summary}</p>

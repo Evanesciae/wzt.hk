@@ -16,19 +16,19 @@ const date = (value: string) => new Date(`${value.slice(0, 10)}T00:00:00`);
 
 const recentItems = [
   ...notes.map((note) => ({
-    type: '知识', title: note.title, summary: note.summary,
+    type: 'Knowledge', title: note.title, summary: note.summary,
     href: `/kb/${note.id}/`, updatedAt: note.updatedAt, meta: categoryTitle(note.category),
   })),
   ...trips.map((trip) => ({
-    type: '旅行', title: trip.title, summary: trip.summary,
+    type: 'Travel', title: trip.title, summary: trip.summary,
     href: `/travel/${trip.id}/`, updatedAt: trip.updatedAt, meta: trip.destination,
   })),
 ].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 6);
 
 const searchIndex = [
-  ...notes.map((note) => ({ type: '知识', title: note.title, meta: `${categoryTitle(note.category)} · ${note.tags.join(' · ')}`, href: `/kb/${note.id}/`, search: `${note.title} ${note.summary} ${note.tags.join(' ')}` })),
-  ...trips.map((trip) => ({ type: '旅行', title: trip.title, meta: trip.destination, href: `/travel/${trip.id}/`, search: `${trip.title} ${trip.destination} ${trip.summary}` })),
-  ...flights.map((flight) => ({ type: '航班', title: `${flight.fromAirport.code} → ${flight.toAirport.code}`, meta: `${formatFlightDate(flight.date, flight.datePrecision)} · ${flight.flightNumber || '航班待确认'}`, href: `/travel/flights/${flight.id}/`, search: `${flight.flightNumber} ${flight.airlineName ?? ''} ${flight.fromAirport.code} ${flight.fromAirport.city} ${flight.toAirport.code} ${flight.toAirport.city}` })),
+  ...notes.map((note) => ({ type: 'Knowledge', title: note.title, meta: `${categoryTitle(note.category)} · ${note.tags.join(' · ')}`, href: `/kb/${note.id}/`, search: `${note.title} ${note.summary} ${note.tags.join(' ')}` })),
+  ...trips.map((trip) => ({ type: 'Travel', title: trip.title, meta: trip.destination, href: `/travel/${trip.id}/`, search: `${trip.title} ${trip.destination} ${trip.summary}` })),
+  ...flights.map((flight) => ({ type: 'Flight', title: `${flight.fromAirport.code} → ${flight.toAirport.code}`, meta: `${formatFlightDate(flight.date, flight.datePrecision)} · ${flight.flightNumber || '航班待确认'}`, href: `/travel/flights/${flight.id}/`, search: `${flight.flightNumber} ${flight.airlineName ?? ''} ${flight.fromAirport.code} ${flight.fromAirport.city} ${flight.toAirport.code} ${flight.toAirport.city}` })),
 ];
 ---
 
@@ -50,12 +50,12 @@ const searchIndex = [
       <nav class="portal-grid home-portals" aria-label="主要区域">
         <a class="portal-card" href="/travel/">
           <span class="portal-icon">T</span>
-          <div><h2>旅行</h2><p>{trips.length} 个计划 · {flights.length} 段航班</p></div>
+          <div><h2>Travel</h2><p>{trips.length} plans · {flights.length} flights</p></div>
           <span class="portal-arrow">→</span>
         </a>
         <a class="portal-card" href="/kb/">
           <span class="portal-icon">K</span>
-          <div><h2>知识库</h2><p>{notes.length} 篇笔记</p></div>
+          <div><h2>Knowledge</h2><p>{notes.length} notes</p></div>
           <span class="portal-arrow">→</span>
         </a>
       </nav>

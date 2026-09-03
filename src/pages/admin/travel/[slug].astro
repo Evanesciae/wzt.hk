@@ -122,7 +122,7 @@ const tripMeta = { id: trip.id, title: trip.title, destination: trip.destination
       <div class="form-grid">
         <label class="full">标题<input name="title" required maxlength="120" /></label>
         <label>目的地<input name="destination" required /></label>
-        <label>状态<select name="status"><option value="planning">计划中</option><option value="upcoming">即将出发</option><option value="archived">已归档</option></select></label>
+        <label>状态<select name="status"><option value="planning">待定</option><option value="upcoming">即将出发</option><option value="archived">已归档</option></select></label>
         <label class="full form-check-inline"><input name="datesTbd" type="checkbox" /><span>日期待定（只按 Day 顺序规划）</span></label>
         <label data-trip-date-field>开始日期<input name="startDate" type="date" required /></label>
         <label data-trip-date-field>结束日期<input name="endDate" type="date" required /></label>
