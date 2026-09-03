@@ -5,7 +5,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
   const path = context.url.pathname;
   const nextWithPageCachePolicy = async () => {
     const response = await next();
-    if (!path.startsWith('/travel/flights')) return response;
+    // Every page is SSR'd from D1, so no HTML may be edge-cached
+    // (the zone caches HTML by default; /media/* keeps its immutable headers).
+    if (!response.headers.get('content-type')?.includes('text/html')) return response;
     const headers = new Headers(response.headers);
     headers.set('Cache-Control', 'no-store, max-age=0');
     headers.set('CDN-Cache-Control', 'no-store');
