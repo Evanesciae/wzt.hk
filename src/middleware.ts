@@ -21,8 +21,18 @@ export const onRequest = defineMiddleware(async (context, next) => {
   if (context.url.hostname === 'paste.wzt.hk' && path === '/') {
     return context.rewrite('/pasteboard');
   }
-  if (context.url.hostname === 'meme.wzt.hk' && path === '/') {
-    return context.rewrite('/memes');
+  if (context.url.hostname === 'meme.wzt.hk') {
+    // meme.wzt.hk is gallery-only: expose the memes page, its media and
+    // bundled assets; everything else on the main site is not served here.
+    const allowed = path === '/' || path.startsWith('/memes') || path.startsWith('/media/')
+      || path.startsWith('/_astro/') || path === '/favicon.svg';
+    // no-store because this zone's edge cache shares entries across hostnames,
+    // and a cacheable 404 here would leak onto the main site's paths.
+    if (!allowed) return new Response('Not found', {
+      status: 404,
+      headers: { 'Cache-Control': 'no-store, max-age=0', 'CDN-Cache-Control': 'no-store' },
+    });
+    if (path === '/') return context.rewrite('/memes');
   }
   const isAdminPage = path.startsWith('/admin') && path !== '/admin/login';
   const isAdminApi = path.startsWith('/api/admin');

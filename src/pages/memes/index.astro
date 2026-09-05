@@ -17,7 +17,7 @@ const seriesList = [...seriesCounts.entries()]
   .map(([series]) => series);
 ---
 
-<BaseLayout title="表情包" description="表情包仓库，点图复制。" brandHref="https://wzt.hk">
+<BaseLayout title="表情包" description="表情包仓库，点图复制。" brandHref="https://wzt.hk" bare>
   <div class="container page-shell">
     <PageHeader eyebrow="MEMES" title="表情包" description="点图片放大，一键复制。" count={memes.length} />
 
@@ -33,7 +33,7 @@ const seriesList = [...seriesCounts.entries()]
         ))}
         {seriesCounts.has('') && <button class="filter-button" type="button" data-filter="__loose__">散图</button>}
       </div>
-      {isAdmin && <a class="filter-button" href="/admin/memes">上传管理</a>}
+      {isAdmin && <a class="filter-button" href="https://wzt.hk/admin/memes">上传管理</a>}
     </div>
 
     {memes.length === 0
