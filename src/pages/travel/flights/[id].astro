@@ -34,7 +34,7 @@ function duration(minutes?: number) {
         <dl class="trip-facts">
           <div><dt>出发</dt><dd>{flight.fromAirport.city} {flight.fromAirport.code}</dd></div>
           <div><dt>到达</dt><dd>{flight.toAirport.city} {flight.toAirport.code}</dd></div>
-          <div><dt>时间</dt><dd>{time(flight.scheduledDeparture)} → {time(flight.scheduledArrival)}</dd></div>
+          <div><dt>时间</dt><dd>{time(flight.scheduledDeparture)} → {time(flight.scheduledArrival)}{(flight.actualDeparture || flight.actualArrival) && <span>（实际{flight.actualDeparture ? `起飞 ${time(flight.actualDeparture)}` : ''}{flight.actualDeparture && flight.actualArrival ? '、' : ''}{flight.actualArrival ? `到达 ${time(flight.actualArrival)}` : ''}）</span>}</dd></div>
           <div><dt>时长</dt><dd>{duration(flight.durationMinutes)}</dd></div>
           <div><dt>距离</dt><dd>{flight.distanceKm ? `${flight.distanceKm} km` : '—'}</dd></div>
           <div><dt>机型</dt><dd>{flight.aircraftType ?? '—'}</dd></div>

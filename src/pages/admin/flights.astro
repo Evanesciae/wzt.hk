@@ -25,6 +25,9 @@ const [flights, trips] = await Promise.all([listFlights(), listTrips(true)]);
         <label data-exact-date-field>计划起飞<input name="departureTime" type="time" /></label>
         <label data-exact-date-field>计划到达<input name="arrivalTime" type="time" /></label>
         <label class="form-check-inline" data-exact-date-field><input name="arrivalNextDay" type="checkbox" /><span>次日到达</span></label>
+        <label data-exact-date-field>实际起飞<input name="actualDepartureTime" type="time" /></label>
+        <label data-exact-date-field>实际到达<input name="actualArrivalTime" type="time" /></label>
+        <label class="form-check-inline" data-exact-date-field><input name="actualArrivalNextDay" type="checkbox" /><span>次日到达</span></label>
 
         <div class="airport-picker" data-airport-picker="from">
           <label>出发机场<input name="fromAirportSearch" autocomplete="off" placeholder="HKG / 香港 / Hong Kong" required /></label>
@@ -198,6 +201,8 @@ const [flights, trips] = await Promise.all([listFlights(), listTrips(true)]);
       toAirport,
       scheduledDeparture: datePrecision === 'day' ? dateTime(date, data.get('departureTime')) : undefined,
       scheduledArrival: datePrecision === 'day' ? dateTime(date, data.get('arrivalTime'), form.elements.arrivalNextDay.checked) : undefined,
+      actualDeparture: datePrecision === 'day' ? dateTime(date, data.get('actualDepartureTime')) : undefined,
+      actualArrival: datePrecision === 'day' ? dateTime(date, data.get('actualArrivalTime'), form.elements.actualArrivalNextDay.checked) : undefined,
       aircraftType: data.get('aircraftType') || undefined,
       aircraftReg: data.get('aircraftReg') || undefined,
       cabin: data.get('cabin') || undefined,
@@ -226,6 +231,9 @@ const [flights, trips] = await Promise.all([listFlights(), listTrips(true)]);
     form.elements.departureTime.value = flight.scheduledDeparture?.slice(11, 16) ?? '';
     form.elements.arrivalTime.value = flight.scheduledArrival?.slice(11, 16) ?? '';
     form.elements.arrivalNextDay.checked = flight.scheduledArrival?.slice(0, 10) > flight.date;
+    form.elements.actualDepartureTime.value = flight.actualDeparture?.slice(11, 16) ?? '';
+    form.elements.actualArrivalTime.value = flight.actualArrival?.slice(11, 16) ?? '';
+    form.elements.actualArrivalNextDay.checked = (flight.actualArrival?.slice(0, 10) ?? '') > flight.date;
     form.elements.aircraftType.value = flight.aircraftType ?? '';
     form.elements.aircraftReg.value = flight.aircraftReg ?? '';
     form.elements.cabin.value = flight.cabin ?? '';
