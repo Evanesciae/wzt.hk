@@ -9,21 +9,21 @@ import 'katex/dist/katex.min.css';
 if(!Astro.locals.adminSession)return Astro.redirect('/admin/login?next='+encodeURIComponent(Astro.url.pathname));
 const e=env as unknown as StudyEnv;
 const s=await e.DB.prepare('SELECT * FROM study_sources WHERE id=?').bind(Astro.params.id??'').first<Source>();
-if(!s)return new Response('File not found',{status:404});
+if(!s)return new Response('资料不存在',{status:404});
 const versions=(await e.DB.prepare('SELECT * FROM study_versions WHERE source_id=? ORDER BY created_at DESC').bind(s.id).all<Record<string,any>>()).results ?? [];
 const notes=(await e.DB.prepare('SELECT * FROM study_notes WHERE source_id=? ORDER BY created_at DESC').bind(s.id).all<Record<string,any>>()).results ?? [];
 const current=notes.find(n=>n.version_id===s.version_id);
 ---
 <BaseLayout title={s.title} bare brandHref="/admin">
   <meta slot="head" name="robots" content="noindex,nofollow" />
-  <main class="study-shell"><nav><a href="/admin/study">← NTU</a><a href={s.source_url} target="_blank" rel="noopener noreferrer">View on NTULearn ↗</a></nav>
-    <header><span class="badge">Private</span><h1>{s.title}</h1><p class="muted">{s.kind==='assignment'?'Assignment':'Course material'} · Updated {singapore(s.updated_at)}</p></header>
-    {s.due_at&&<section class="panel"><strong>Due: {singapore(s.due_at)}</strong><p><a class="button" href={`/api/admin/study/calendar/${s.id}`}>Download calendar event</a></p><p class="muted">Download this event and import it into your calendar.</p></section>}
-    <section class="panel"><h2>Original file</h2><div class="row">{s.version_id?<a class="button" href={`/api/admin/study/files/${s.version_id}`}>Download current version</a>:<p>File download is pending. Check the sync history for details.</p>}</div><p class="muted">Your original course file is stored here for future reading, revision or assignment work with Muse.</p>
-      {s.body&&<details><summary>Course description</summary><p class="body">{s.body}</p></details>}
+  <main class="study-shell"><nav><a href="/admin/study">← 课程资料</a><a href={s.source_url} target="_blank" rel="noopener noreferrer">学校原页面 ↗</a></nav>
+    <header><span class="badge">私人</span><h1>{s.title}</h1><p class="muted">{s.kind==='assignment'?'Assignment':'课程资料'} · 最近更新 {singapore(s.updated_at)}</p></header>
+    {s.due_at&&<section class="panel"><strong>截止：{singapore(s.due_at)}</strong><p><a class="button" href={`/api/admin/study/calendar/${s.id}`}>下载日历事项</a></p><p class="muted">下载后可导入你的日历。</p></section>}
+    <section class="panel"><h2>原文件</h2><div class="row">{s.version_id?<a class="button" href={`/api/admin/study/files/${s.version_id}`}>下载当前原件</a>:<p>原件尚未下载完成，请查看同步记录。</p>}</div><p class="muted">课程原件保存在这里，后续可交给 Muse 阅读、预习或处理作业。</p>
+      {s.body&&<details><summary>课程页面说明</summary><p class="body">{s.body}</p></details>}
     </section>
     {current&&<article class="note" set:html={studyMarkdown(current.markdown)} />}
-    <details class="panel"><summary>File versions & saved notes</summary>{versions.map(v=><div class="entry"><a href={`/api/admin/study/files/${v.id}`}>{v.filename}</a><p class="muted">{singapore(v.created_at)} · {(v.size/1024).toFixed(0)} KB · {v.id===s.version_id?'Current version':'Earlier version'}</p>{notes.filter(n=>n.version_id===v.id&&n.id!==current?.id).map(n=><details><summary>{n.model} · {singapore(n.created_at)} notes</summary><article class="note" set:html={studyMarkdown(n.markdown)} /></details>)}</div>)}</details>
+    <details class="panel"><summary>原件版本与历史笔记</summary>{versions.map(v=><div class="entry"><a href={`/api/admin/study/files/${v.id}`}>{v.filename}</a><p class="muted">{singapore(v.created_at)} · {(v.size/1024).toFixed(0)} KB · {v.id===s.version_id?'当前版本':'历史版本'}</p>{notes.filter(n=>n.version_id===v.id&&n.id!==current?.id).map(n=><details><summary>{n.model} · {singapore(n.created_at)} 的笔记</summary><article class="note" set:html={studyMarkdown(n.markdown)} /></details>)}</div>)}</details>
     <div id="feedback" role="status" hidden></div>
   </main>
 </BaseLayout>

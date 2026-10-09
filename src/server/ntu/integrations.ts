@@ -4,7 +4,13 @@ type Row = Record<string, any>;
 export async function bb(cookie: string, path: string): Promise<Row> {
   const response = await fetch(ntuURL(path), { headers:{Cookie:`BbRouter=${cookie}`,Accept:'application/json'}, redirect:'manual', signal:AbortSignal.timeout(15000) });
   if ([301,302,303,307,308,401].includes(response.status)) throw new NtuError('NTULearn 登录已过期，请更新 BbRouter Cookie。');
-  if (!response.ok) throw new NtuError(`NTULearn 请求失败（${response.status}）。可能是权限或访问限制，请测试连接。`);
+  if (!response.ok) {
+    const endpoint=ntuURL(path).pathname.includes('/calendars/')?'日历':ntuURL(path).pathname.includes('/announcements')?'公告':'课程';
+    if(response.status===400)throw new NtuError(`NTULearn ${endpoint}接口拒绝了请求参数（400），请联系维护者检查查询范围与参数。`);
+    if(response.status===403)throw new NtuError(`NTULearn ${endpoint}接口拒绝访问（403），请确认学校页面中可以打开该课程。`);
+    if(response.status===429)throw new NtuError('NTULearn 请求过于频繁，请稍后重试。');
+    throw new NtuError(`NTULearn ${endpoint}接口暂时失败（${response.status}），请稍后重试。`);
+  }
   if (!response.headers.get('content-type')?.includes('json')) throw new NtuError('NTULearn 未返回数据，请重新登录并更新 Cookie。');
   return response.json();
 }
@@ -25,6 +31,20 @@ export async function telegram(token: string, method: 'getMe'|'getUpdates'|'send
   const data = await r.json() as {ok:boolean; result:any; parameters?:{retry_after?:number}};
   if (!r.ok || !data.ok) throw new NtuError(`Telegram 请求失败（${r.status}）。请检查 Token、Chat ID，并先向机器人发送 /start。`);
   return data.result;
+}
+// Blackboard limits each calendar query to 16 weeks. Use bounded windows and
+// deduplicate inclusive boundaries; never turn a failed window into an empty feed.
+// https://docs.blackboard.com/docs/blackboard/rest-apis/hands-on/calendar-apis
+export async function calendarItems(cookie:string,courseId:string,since:string,until:string):Promise<Row[]> {
+  const start=Date.parse(since),end=Date.parse(until),window=28*86400000;
+  if(!Number.isFinite(start)||!Number.isFinite(end)||end<=start||end-start>366*86400000)throw new NtuError('日历查询范围不正确。');
+  const result=new Map<string,Row>();
+  for(let cursor=start;cursor<end;cursor+=window){
+    const query=new URLSearchParams({courseId,since:new Date(cursor).toISOString(),until:new Date(Math.min(cursor+window,end)).toISOString()});
+    const rows=await pages(cookie,`/learn/api/public/v1/calendars/items?${query}`);
+    for(const row of rows){if(!row.id)throw new NtuError('NTULearn 日历数据缺少标识，本轮未完成。');result.set(String(row.id),row);}
+  }
+  return [...result.values()];
 }
 export async function sendTelegram(token: string, chatId: string, text: string) {
   if (!token || !chatId) throw new NtuError('请先配置 Telegram Token 和 Chat ID。');

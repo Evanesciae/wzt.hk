@@ -100,5 +100,21 @@ test('school-only settings preserve the cookie and need no model or messaging co
   await assert.rejects(svc.saveSchoolConnection(f.env,{revision:1,courseIds:['_1_1'],enabled:true,interval:60}),/窗口更新/);
   f.db.close();
 });
+test('calendar queries obey upstream limits, cover the full range and deduplicate boundaries',async()=>{
+  const ranges=[];
+  globalThis.fetch=async url=>{
+    const u=new URL(url),since=Date.parse(u.searchParams.get('since')),until=Date.parse(u.searchParams.get('until'));
+    assert.equal(u.searchParams.get('courseId'),'_1_1');
+    if(until-since>112*86400000)return Response.json({message:'Maximum timespan is 16 weeks'},{status:400});
+    ranges.push([since,until]);return Response.json({results:[{id:'boundary'},{id:'event-'+ranges.length}]});
+  };
+  const start='2026-10-08T00:00:00.000Z',end='2027-02-06T00:00:00.000Z';
+  const rows=await integrations.calendarItems('secret','_1_1',start,end);
+  assert.equal(ranges.length,5);assert.equal(ranges[0][0],Date.parse(start));assert.equal(ranges.at(-1)[1],Date.parse(end));
+  for(let i=1;i<ranges.length;i++)assert.equal(ranges[i][0],ranges[i-1][1]);
+  assert.equal(rows.length,6);
+  globalThis.fetch=async()=>Response.json({},{status:400});
+  await assert.rejects(integrations.calendarItems('secret','_1_1',start,end),/请求参数（400）/);
+});
 process.on('exit',()=>{globalThis.fetch=nativeFetch;});
 await test('cleanup',async()=>{await rm(dir,{recursive:true,force:true});});
