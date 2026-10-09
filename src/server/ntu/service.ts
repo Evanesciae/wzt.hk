@@ -65,6 +65,10 @@ export async function refreshCourses(env:NtuEnv) {
   }
   return {message:`连接成功，读取到 ${active.length} 门可用课程。`};
 }
+export async function saveSchoolConnection(env:NtuEnv,input:{revision:number;courseIds:string[];cookie?:string;enabled:boolean;interval:number}) {
+  const current=await settings(env);
+  return saveSettings(env,{revision:input.revision,config:{...current.config,courseIds:input.courseIds,enabled:input.enabled,interval:input.interval,telegramEnabled:false,aiEnabled:false},secrets:{cookie:input.cookie}});
+}
 export async function overview(env:NtuEnv) {
   const [s,state,courses,items,counts,delivery] = await Promise.all([
     settings(env),env.DB.prepare('SELECT last_attempt,last_success,error,warning,lock_until FROM ntu_state WHERE id=1').first(),

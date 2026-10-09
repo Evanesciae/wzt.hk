@@ -749,7 +749,7 @@ html.has-map-expanded, html.has-map-expanded body { overflow: hidden; overscroll
 
 @media (max-width: 600px) {
   .container { width: min(100% - 32px, 1120px); }
-  .header-inner { height: 58px; }
+  .header-inner { min-height: 58px; height: auto; flex-wrap: wrap; gap: 4px 8px; padding-block: 8px; }
   .site-nav { gap: 0; }
   .site-nav a { padding-inline: 7px; font-size: 13px; }
   .theme-toggle { width: 31px; height: 31px; margin-left: 1px; padding: 0; justify-content: center; }

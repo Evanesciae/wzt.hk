@@ -10,34 +10,31 @@ const page=Math.max(0,Math.min(1000,Number(Astro.url.searchParams.get('page'))||
 const sources=(await e.DB.prepare('SELECT s.*,c.name AS course_name FROM study_sources s LEFT JOIN ntu_courses c ON c.id=s.course_id ORDER BY s.updated_at DESC LIMIT 51 OFFSET ?').bind(Math.floor(page)*50).all<Source&{course_name:string}>()).results ?? [];
 const runs=(await e.DB.prepare("SELECT * FROM automation_runs ORDER BY started_at DESC LIMIT 10").all<Record<string,any>>()).results ?? [];
 const jobs=(await e.DB.prepare('SELECT j.*,s.title FROM automation_jobs j JOIN study_sources s ON s.id=j.source_id ORDER BY j.updated_at DESC LIMIT 20').all<Record<string,any>>()).results ?? [];
-const labels:Record<string,string>={completed:'已完成',running:'同步中',partial:'部分完成',needs_auth:'需要更新登录',failed:'失败',interrupted:'等待恢复',pending:'排队中',processing:'分析中',needs_ocr:'需要文字识别'};
+const labels:Record<string,string>={completed:'Completed',running:'Syncing',partial:'Partially completed',needs_auth:'Update login cookie',failed:'Failed',interrupted:'Waiting to resume',pending:'Queued',processing:'Processing',needs_ocr:'OCR needed'};
 ---
-<BaseLayout title="私有课程资料" bare brandHref="/admin">
+<BaseLayout title="NTU" brandHref="/">
   <meta slot="head" name="robots" content="noindex,nofollow" />
   <main class="study-shell">
-    <nav><a href="/admin">← 管理中心</a><a href="/admin/ntu">学校账号与通知设置</a></nav>
-    <header><h1>课程资料 <span class="badge">仅自己可见</span></h1><p class="muted">原课件、学习笔记和处理记录，保存在一起。</p></header>
-    <section class="panel"><strong>{c.enabled?'课程同步已开启':'课程同步已暂停'}</strong><p class="muted">{runs[0]?`最近检查：${singapore(runs[0].started_at)} · ${labels[runs[0].status]??runs[0].status}`:'尚未开始同步。先在学校账号设置中保存 Cookie 并选择课程，再开启下方同步。'}</p>
+    <nav><a href="/admin">← Admin</a><a class="button" href="/admin/ntu#settings">Connect NTULearn / Choose courses</a></nav>
+    <header><h1>NTU <span class="badge">Private</span></h1><p class="muted">Your course files, assignments and announcements in one place, ready for future use by Muse.</p></header>
+    <section class="panel"><strong>{c.enabled?'File sync enabled':'File sync paused'}</strong><p class="muted">{runs[0]?`Last checked: ${singapore(runs[0].started_at)} · ${labels[runs[0].status]??runs[0].status}`:'No sync runs yet. Connect NTULearn and choose courses, then enable file sync below.'}</p>
       {runs[0]?.error&&<p class="error">{runs[0].error}</p>}
-      <details><summary>同步与分析设置</summary>
+      <details open><summary>Course file sync</summary>
         <form id="study-settings" data-revision={c.revision}>
-          <label><input type="checkbox" name="enabled" checked={!!c.enabled} /> 开启服务器课程同步</label>
-          <label>检查频率<select name="intervalMinutes">{[30,60,120,360].map(n=><option value={n} selected={n===c.interval_minutes}>每 {n} 分钟</option>)}</select></label>
-          <label><input type="checkbox" name="autoAnalyze" checked={!!c.auto_analyze} /> 自动分析后续新增或更新的课件</label>
-          <p class="muted">首次导入的旧资料和 Assignment 由你手动选择分析。内容会发送给智谱通用 API，可能产生费用。每份最多 12 个分段；重试也计入每日次数。</p>
-          <label>每日最多分析次数（新加坡时间）<input type="number" name="dailyJobs" min="1" max="10" value={c.daily_jobs} required /></label>
-          <label>分析模型<input name="model" value={c.model} placeholder="留空使用通知中心的 GLM 模型" pattern="glm-[a-zA-Z0-9_.\-]+" /></label>
-          <button class="primary" type="submit">保存设置</button>
+          <label><input type="checkbox" name="enabled" checked={!!c.enabled} /> Automatically sync course files</label>
+          <label>Check frequency<select name="intervalMinutes">{[30,60,120,360].map(n=><option value={n} selected={n===c.interval_minutes}>Every {n} minutes</option>)}</select></label>
+          <p class="muted">The server saves new files from your selected courses. The first import builds your archive.</p>
+          <button class="primary" type="submit">Save settings</button>
         </form>
       </details>
     </section>
-    <section><h2>课程文件</h2>
-      {!sources.length&&<p class="empty">同步完成后，课程原件会出现在这里。扫描件和复杂图表需要进一步识别，系统会明确标记。</p>}
-      {sources.slice(0,50).map(s=><article class="entry"><a href={`/admin/study/${s.id}`}><strong>{s.title}</strong></a><p class="muted">{s.course_name||s.course_id} · {s.kind==='assignment'?'Assignment':'课件'} · {s.version_id?'原件已保存':'等待下载或重试'} · {singapore(s.updated_at)}</p></article>)}
-      <nav>{page>0&&<a href={`?page=${page-1}`}>上一页</a>}{sources.length>50&&<a href={`?page=${page+1}`}>下一页</a>}</nav>
+    <section><h2>Course files</h2>
+      {!sources.length&&<p class="empty">No files yet. Connect NTULearn, choose your courses and enable sync above.</p>}
+      {sources.slice(0,50).map(s=><article class="entry"><a href={`/admin/study/${s.id}`}><strong>{s.title}</strong></a><p class="muted">{s.course_name||s.course_id} · {s.kind==='assignment'?'Assignment':'Material'} · {s.version_id?'File saved':'Waiting for download or retry'} · {singapore(s.updated_at)}</p></article>)}
+      <nav>{page>0&&<a href={`?page=${page-1}`}>Previous</a>}{sources.length>50&&<a href={`?page=${page+1}`}>Next</a>}</nav>
     </section>
-    <section class="panel"><h2>分析记录</h2>{!jobs.length&&<p class="muted">暂时没有分析任务。</p>}{jobs.map(j=><div class="entry"><a href={`/admin/study/${j.source_id}`}>{j.title}</a><p class="muted">{labels[j.status]??j.status} · {j.model} · 已尝试 {j.attempts} 次</p>{j.error&&<p class="error">{j.error}</p>}</div>)}</section>
-    <details class="panel"><summary>最近 10 次同步记录</summary>{runs.map(r=><div class="entry"><strong>{labels[r.status]??r.status} · {singapore(r.started_at)}</strong>{r.result&&<p class="muted">{r.result}</p>}{r.error&&<p class="error">{r.error}</p>}</div>)}</details>
+    {jobs.length>0&&<section class="panel"><h2>Processing history</h2>{jobs.map(j=><div class="entry"><a href={`/admin/study/${j.source_id}`}>{j.title}</a><p class="muted">{labels[j.status]??j.status}</p>{j.error&&<p class="error">{j.error}</p>}</div>)}</section>}
+    <details class="panel"><summary>Last 10 sync runs</summary>{runs.map(r=><div class="entry"><strong>{labels[r.status]??r.status} · {singapore(r.started_at)}</strong>{r.result&&<p class="muted">{r.result}</p>}{r.error&&<p class="error">{r.error}</p>}</div>)}</details>
     <div id="feedback" role="status" hidden></div>
   </main>
 </BaseLayout>

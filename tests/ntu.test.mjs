@@ -90,5 +90,15 @@ test('hostile pagination cannot leak the Cookie; malformed timestamps do not bec
   let count=0;globalThis.fetch=async()=>{count++;return Response.json({results:[],paging:{nextPage:'https://evil.example/learn/api/public/'}});};
   await assert.rejects(integrations.pages('secret','/learn/api/public/v1/courses'),/不受信任/);assert.equal(count,1);
 });
+test('school-only settings preserve the cookie and need no model or messaging configuration',async()=>{
+  const f=fixture();await f.configure();
+  await svc.saveSchoolConnection(f.env,{revision:1,courseIds:['_1_1'],cookie:'',enabled:true,interval:60});
+  const saved=await svc.settings(f.env,true);
+  assert.equal(saved.secrets.cookie,'private-cookie');
+  assert.equal(saved.config.telegramEnabled,false);assert.equal(saved.config.aiEnabled,false);
+  assert.equal(saved.config.enabled,true);assert.equal(saved.config.interval,60);
+  await assert.rejects(svc.saveSchoolConnection(f.env,{revision:1,courseIds:['_1_1'],enabled:true,interval:60}),/窗口更新/);
+  f.db.close();
+});
 process.on('exit',()=>{globalThis.fetch=nativeFetch;});
 await test('cleanup',async()=>{await rm(dir,{recursive:true,force:true});});
