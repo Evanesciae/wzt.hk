@@ -424,6 +424,9 @@ def study(bridge: Bridge, settings: dict, root: Path, claimed: dict):
 
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    # HTTPX's INFO logs include full URLs; school attachment URLs may be signed.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     root = Path(os.environ.get("WZT_DATA_DIR", "/data"))
     root.mkdir(parents=True, exist_ok=True)
     token = os.environ.get("NTU_RUNNER_TOKEN", "")
