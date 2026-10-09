@@ -79,10 +79,12 @@ def filename(value: str) -> str:
 
 
 class School:
-    def __init__(self, cookie: str, client=None):
+    def __init__(self, cookie: str, client=None, user_agent=None):
         # Never put a Cookie in client defaults: it is attached only after URL checks.
         self.cookie = cookie
         self.http = client or httpx.Client(timeout=60, follow_redirects=False)
+        if user_agent:
+            self.http.headers["User-Agent"] = user_agent
 
     def check(self, response):
         if response.status_code in (301, 302, 303, 307, 308, 401):
@@ -227,7 +229,7 @@ def sync(bridge: Bridge, settings: dict, root: Path):
     if not run_id:
         return
     errors, completed, counts = [], [], {"downloaded": 0, "unchanged": 0}
-    school = School(settings["cookie"])
+    school = School(settings["cookie"], user_agent=settings.get("userAgent"))
     status = "completed"
     start = time.monotonic()
     try:

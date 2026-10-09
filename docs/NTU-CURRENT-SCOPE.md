@@ -9,3 +9,9 @@ The main navigation entry is **NTU**, pointing to `/admin/study`. Only that navi
 Future Muse authentication, read/write capabilities and content extraction should be implemented against the actual Muse connection mechanism. Do not share the VPS runner token with Muse: that credential can receive the school's Cookie and is intended for the server synchronizer. No Muse integration is claimed complete by this change.
 
 User preference: reasonable changes to the existing site are welcome. Reuse existing infrastructure, but do not hide essential entry points or avoid necessary UX changes under the guise of preserving the site.
+
+## Persistent browser (2026-10-09)
+
+`/admin/ntu/browser` adds a private remote login window backed by a single outbound-only browser container on the VPS. The administrator completes school login/MFA, and the browser saves refreshed BbRouter into the existing encrypted settings. Existing selected courses and file synchronization remain intact. Interactive windows expire after 20 minutes; background checks and normal SSO recovery continue until paused. Authentication longevity and real download acceptance require the user's first login; no promise of indefinite authentication.
+
+See `services/ntu-browser/README.md` for credential storage, bounded resources, pause/rollback, origin restrictions and operational limits. This adds no Muse, GLM or Telegram requirement.

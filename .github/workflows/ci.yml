@@ -26,3 +26,4 @@ jobs:
           cache-dependency-path: services/ntu-runner/requirements.txt
       - run: pip install -r services/ntu-runner/requirements.txt
       - run: python -m unittest discover -s services/ntu-runner -v
+      - run: python -m unittest discover -s services/ntu-browser -v
