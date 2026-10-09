@@ -11,32 +11,32 @@ const selected=new Set(config.courseIds);
 const names=new Map(courses.map(c=>[c.id,c.name]));
 const state=data.state as {last_success:string|null;error:string|null};
 ---
-<BaseLayout title="NTULearn connection">
+<BaseLayout title="学校连接">
   <meta slot="head" name="robots" content="noindex,nofollow" />
   <div class="study-shell">
-    <nav><a class="button" href="/admin/study">← NTU</a></nav>
-    <header><h1>NTULearn connection <span class="badge">Private</span></h1><p class="muted">Connect NTULearn and choose your courses. Keep files and announcements here for future use by Muse.</p></header>
+    <nav><a class="button" href="/admin/study">← 课程资料</a></nav>
+    <header><h1>学校连接 <span class="badge">私人</span></h1><p class="muted">连接 NTULearn，选择需要保存的课程。课件和公告集中在这里，供后续 Muse 使用。</p></header>
     <section class="panel" id="settings">
-      <h2>1. Connect your account</h2>
-      <p class="muted">{configured.cookie?'Login cookie saved. Update it here when it expires.':'Your NTULearn account is not connected yet.'}</p>
-      {!data.encryptionReady&&<p class="error">Credential encryption is not ready. Please wait before entering a cookie.</p>}
+      <h2>1. 连接学校账号</h2>
+      <p class="muted">{configured.cookie?'已保存学校登录凭据，过期后可在这里更新。':'尚未连接学校账号。'}</p>
+      {!data.encryptionReady&&<p class="error">凭据加密尚未就绪，请暂勿填写。</p>}
       <form id="connection" data-revision={data.revision}>
-        <label>NTULearn login cookie<input name="cookie" type="password" autocomplete="new-password" maxlength="8000" placeholder={configured.cookie?'Saved — leave blank to keep it':'Paste the BbRouter value'} /></label>
-        <details><summary>Where do I find the cookie?</summary><p class="muted">Sign in to NTULearn in Chrome. On Mac, press Option + Command + I (Windows: F12). Open Application → Cookies → https://ntulearn.ntu.edu.sg, find BbRouter and paste its Value above. Your cookie is encrypted and never shown after saving.</p></details>
-        <p><button type="button" data-courses disabled={!data.encryptionReady}>Save & load courses</button></p>
-        <h2>2. Choose courses</h2>
-        {courses.length?courses.map(c=><label><input type="checkbox" name="courseId" value={c.id} checked={selected.has(c.id)} /> {c.name}<span class="muted"> · {c.code}</span></label>):<p class="muted">Your courses will appear here after connecting.</p>}
-        <h2>3. Course announcements</h2>
-        <label><input name="enabled" type="checkbox" checked={config.enabled} /> Automatically sync announcements and calendar events</label>
-        <label>Check frequency<select name="interval">{[30,60,120].map(n=><option value={n} selected={config.interval===n}>Every {n} minutes</option>)}</select></label>
-        <p class="muted">Enable automatic file downloads on the NTU page.</p>
-        <div class="row"><button type="submit" class="primary" disabled={!data.encryptionReady}>Save connection</button><a class="button" href="/admin/study">Go to course files →</a></div>
+        <label>学校登录 Cookie<input name="cookie" type="password" autocomplete="new-password" maxlength="8000" placeholder={configured.cookie?'已保存 · 留空保持不变':'粘贴 BbRouter 的值'} /></label>
+        <details><summary>如何找到 Cookie？</summary><p class="muted">在 Chrome 登录 NTULearn。Mac 按 Option + Command + I，Windows 按 F12，进入 Application → Cookies → https://ntulearn.ntu.edu.sg，找到 BbRouter，把 Value 粘贴到上方。凭据加密保存，页面不会回显。</p></details>
+        <p><button type="button" data-courses disabled={!data.encryptionReady}>保存并读取课程</button></p>
+        <h2>2. 选择课程</h2>
+        {courses.length?courses.map(c=><label><input type="checkbox" name="courseId" value={c.id} checked={selected.has(c.id)} /> {c.name}<span class="muted"> · {c.code}</span></label>):<p class="muted">连接成功后，课程列表会出现在这里。</p>}
+        <h2>3. 课程公告</h2>
+        <label><input name="enabled" type="checkbox" checked={config.enabled} /> 定时更新网站中的公告与日历事项</label>
+        <label>检查频率<select name="interval">{[30,60,120].map(n=><option value={n} selected={config.interval===n}>每 {n} 分钟</option>)}</select></label>
+        <p class="muted">课件文件的自动下载需要在课程资料页开启。</p>
+        <div class="row"><button type="submit" class="primary" disabled={!data.encryptionReady}>保存学校设置</button><a class="button" href="/admin/study">前往课程文件同步 →</a></div>
       </form>
     </section>
-    <section class="panel"><div class="row"><h2>Announcements & calendar</h2><button type="button" data-sync disabled={!configured.cookie||!selected.size}>Refresh announcements</button></div>
-      <p class="muted">{state.last_success?'Last updated: '+singapore(state.last_success):'No announcements synced yet.'}</p>{state.error&&<p class="error">{state.error}</p>}
-      {!items.length&&<p class="muted">Original announcements and dates will appear here after syncing.</p>}
-      {items.map(item=><article class="entry"><strong>{item.title}</strong><p class="muted">{names.get(item.course_id)??item.course_id}{item.due_at?' · '+singapore(item.due_at):''}</p><p class="body">{item.body||'Open NTULearn to view this item.'}</p><a href={item.source_url} target="_blank" rel="noopener noreferrer">View on NTULearn ↗</a></article>)}
+    <section class="panel"><div class="row"><h2>课程公告与日历</h2><button type="button" data-sync disabled={!configured.cookie||!selected.size}>立即更新公告</button></div>
+      <p class="muted">{state.last_success?'最近更新：'+singapore(state.last_success):'尚未更新公告。'}</p>{state.error&&<p class="error">{state.error}</p>}
+      {!items.length&&<p class="muted">同步后在这里查看课程原始公告和日期。</p>}
+      {items.map(item=><article class="entry"><strong>{item.title}</strong><p class="muted">{names.get(item.course_id)??item.course_id}{item.due_at?' · '+singapore(item.due_at):''}</p><p class="body">{item.body||'请查看学校原文。'}</p><a href={item.source_url} target="_blank" rel="noopener noreferrer">学校原页面 ↗</a></article>)}
     </section>
     <div id="feedback" role="status" aria-live="polite" hidden></div>
   </div>
@@ -48,7 +48,7 @@ const state=data.state as {last_success:string|null;error:string|null};
   let busy=false;
   async function api(body:Record<string,unknown>){
     const r=await fetch('/api/admin/ntu',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify(body)});
-    const result=await r.json();if(!r.ok)throw new Error(result.error||'Could not save. Please try again.');return result;
+    const result=await r.json();if(!r.ok)throw new Error(result.error||'保存失败，请重试。');return result;
   }
   async function save(){
     const d=new FormData(form);
@@ -57,8 +57,8 @@ const state=data.state as {last_success:string|null;error:string|null};
     (form.elements.namedItem('cookie') as HTMLInputElement).value='';
   }
   async function perform(action:()=>Promise<void>){
-    if(busy)return;busy=true;feedback.hidden=false;feedback.textContent='Working…';
-    try{await action();location.reload();}catch(error){feedback.textContent=error instanceof Error?error.message:'Connection failed. Please try again.';}finally{busy=false;}
+    if(busy)return;busy=true;feedback.hidden=false;feedback.textContent='正在处理…';
+    try{await action();location.reload();}catch(error){feedback.textContent=error instanceof Error?error.message:'网络连接失败，请重试。';}finally{busy=false;}
   }
   form.addEventListener('submit',e=>{e.preventDefault();void perform(save);});
   document.querySelector('[data-courses]')?.addEventListener('click',()=>void perform(async()=>{await save();await api({action:'courses'});}));

@@ -1,5 +1,5 @@
 import { defaults, hash, important, iso, NtuError, plain, reminderDue, safeError, singapore, validateConfig, type Config } from './core';
-import { bb, pages, sendTelegram, sourceURL, summarize, telegram } from './integrations';
+import { bb, pages, calendarItems, sendTelegram, sourceURL, summarize, telegram } from './integrations';
 export interface NtuEnv { DB: D1Database; NTU_ENCRYPTION_KEY?: string }
 type Secrets = {cookie?:string;telegramToken?:string;glmKey?:string};
 type Stored = {config:string;secrets:string;revision:number};
@@ -110,7 +110,7 @@ async function syncCourse(env:NtuEnv,cookie:string,course:Course) {
   const since = new Date(Date.now()-86400000).toISOString(); const until=new Date(Date.now()+120*86400000).toISOString();
   const [announcements,events] = await Promise.all([
     pages(cookie,`/learn/api/public/v1/courses/${encodeURIComponent(course.id)}/announcements`),
-    pages(cookie,`/learn/api/public/v1/calendars/items?${new URLSearchParams({courseId:course.id,since,until})}`),
+    calendarItems(cookie,course.id,since,until),
   ]);
   const inputs = [...announcements.map(a=>({row:a,kind:'announcement'})),...events.map(a=>({row:a,kind:'calendar'}))];
   for(const {row,kind} of inputs) {
