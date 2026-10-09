@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
-import { overview, runSync, saveSettings, testIntegration, type NtuEnv } from '../../../../server/ntu/service';
+import { overview, runSync, saveSettings, saveSchoolConnection, testIntegration, type NtuEnv } from '../../../../server/ntu/service';
 import { safeError } from '../../../../server/ntu/core';
 const bindings = () => env as unknown as NtuEnv;
 const reply = (data:unknown,status=200) => Response.json(data,{status,headers:{'Cache-Control':'private, no-store','CDN-Cache-Control':'no-store'}});
@@ -13,6 +13,7 @@ export const POST: APIRoute = async ({request,locals}) => {
   try {
     const raw=await request.text(); if(raw.length>30000)return reply({error:'提交内容过长。'},413);
     const body=JSON.parse(raw);
+    if(body.action==='school-save') return reply(await saveSchoolConnection(bindings(),body));
     if(body.action==='save') return reply(await saveSettings(bindings(),body));
     if(body.action==='sync') return reply(await runSync(bindings(),true));
     if(body.action==='read' && typeof body.id==='string') {
