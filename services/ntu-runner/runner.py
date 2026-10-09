@@ -79,10 +79,12 @@ def filename(value: str) -> str:
 
 
 class School:
-    def __init__(self, cookie: str, client=None):
+    def __init__(self, cookie: str, client=None, user_agent=None):
         # Never put a Cookie in client defaults: it is attached only after URL checks.
         self.cookie = cookie
         self.http = client or httpx.Client(timeout=60, follow_redirects=False)
+        if user_agent:
+            self.http.headers["User-Agent"] = user_agent
 
     def check(self, response):
         if response.status_code in (301, 302, 303, 307, 308, 401):
@@ -116,6 +118,15 @@ class School:
             rows.extend(data["results"])
             path = (data.get("paging") or {}).get("nextPage")
         return rows
+
+    def attachments(self, path: str, item: dict):
+        # Blackboard's attachment endpoint applies to content documents/files,
+        # not folder navigation or external tools. Still inspect their body links.
+        handler = (item.get("contentHandler") or {}).get("id", "")
+        if handler in {"resource/x-bb-folder", "resource/x-bb-externallink",
+                       "resource/x-bb-courselink", "resource/x-bb-blti-link"}:
+            return []
+        return self.pages(path + "/attachments", missing_ok=True)
 
     def download(self, path: str, destination: Path):
         url = trusted_url(path)
@@ -218,7 +229,7 @@ def sync(bridge: Bridge, settings: dict, root: Path):
     if not run_id:
         return
     errors, completed, counts = [], [], {"downloaded": 0, "unchanged": 0}
-    school = School(settings["cookie"])
+    school = School(settings["cookie"], user_agent=settings.get("userAgent"))
     status = "completed"
     start = time.monotonic()
     try:
@@ -248,7 +259,7 @@ def sync(bridge: Bridge, settings: dict, root: Path):
                     try:
                         # Reading item details avoids truncation in directory responses.
                         full = school.json(path)
-                        files = links(full, school.pages(path + "/attachments", missing_ok=True), course, cid)
+                        files = links(full, school.attachments(path, full), course, cid)
                         body = plain(body_text(full))
                         title = str(full.get("title") or cid)
                         handler = str((full.get("contentHandler") or {}).get("id", ""))
@@ -256,35 +267,42 @@ def sync(bridge: Bridge, settings: dict, root: Path):
                         if not files and body and (kind == "assignment" or len(body) >= 100):
                             files = [("description", None, "assignment.md" if kind == "assignment" else "lesson.md", {"body": body})]
                         for aid, url, name, attachment in files:
-                            sid = source_id(course, cid, aid)
-                            # A periodic refresh catches same-name replacements without reliable mtime.
-                            fp = digest(canonical({"item": full, "attachment": attachment}))
-                            previous = known.get(sid)
-                            fresh = previous and (datetime.now(timezone.utc) - datetime.fromisoformat(previous["checked_at"].replace("Z", "+00:00"))).total_seconds() < 7*86400
-                            if previous and previous["fingerprint"] == fp and previous["version_id"] and fresh:
-                                counts["unchanged"] += 1
-                                continue
-                            if shutil.disk_usage(root).free < 5*1024**3:
-                                raise WorkError("服务器可用空间不足 5 GB，已暂停下载。")
-                            result = bridge.action("source", runId=run_id, courseId=course, contentId=cid, attachmentId=aid,
-                                                   title=f"{title} · {name}", kind=kind, body=body,
-                                                   dueAt=full.get("dueDate"), fingerprint=fp)
-                            if result["id"] != sid:
-                                raise WorkError("文件标识校验失败。")
-                            folder = root / "originals" / sid
-                            folder.mkdir(parents=True, exist_ok=True)
-                            temporary = folder / "incoming"
-                            if url:
-                                school.download(url, temporary)
-                            else:
-                                temporary.write_text(body, encoding="utf-8")
-                            data = temporary.read_bytes()
-                            file_hash = digest(data)
-                            local = folder / (file_hash + Path(name).suffix.lower())
-                            temporary.replace(local)
-                            bridge.request("POST", content=data, headers={"Content-Type": "application/octet-stream", "x-run-id": run_id,
-                                "x-source-id": sid, "x-file-hash": file_hash, "x-file-name": quote(name, safe="")})
-                            counts["downloaded"] += 1
+                            try:
+                                sid = source_id(course, cid, aid)
+                                # A periodic refresh catches same-name replacements without reliable mtime.
+                                fp = digest(canonical({"item": full, "attachment": attachment}))
+                                previous = known.get(sid)
+                                fresh = previous and (datetime.now(timezone.utc) - datetime.fromisoformat(previous["checked_at"].replace("Z", "+00:00"))).total_seconds() < 7*86400
+                                if previous and previous["fingerprint"] == fp and previous["version_id"] and fresh:
+                                    counts["unchanged"] += 1
+                                    continue
+                                if shutil.disk_usage(root).free < 5*1024**3:
+                                    raise WorkError("服务器可用空间不足 5 GB，已暂停下载。")
+                                result = bridge.action("source", runId=run_id, courseId=course, contentId=cid, attachmentId=aid,
+                                                       title=f"{title} · {name}", kind=kind, body=body,
+                                                       dueAt=full.get("dueDate"), fingerprint=fp)
+                                if result["id"] != sid:
+                                    raise WorkError("文件标识校验失败。")
+                                folder = root / "originals" / sid
+                                folder.mkdir(parents=True, exist_ok=True)
+                                temporary = folder / "incoming"
+                                if url:
+                                    school.download(url, temporary)
+                                else:
+                                    temporary.write_text(body, encoding="utf-8")
+                                data = temporary.read_bytes()
+                                file_hash = digest(data)
+                                local = folder / (file_hash + Path(name).suffix.lower())
+                                temporary.replace(local)
+                                bridge.request("POST", content=data, headers={"Content-Type": "application/octet-stream", "x-run-id": run_id,
+                                    "x-source-id": sid, "x-file-hash": file_hash, "x-file-name": quote(name, safe="")})
+                                counts["downloaded"] += 1
+                            except NeedsAuth:
+                                raise
+                            except (WorkError, httpx.HTTPError, ValueError) as error:
+                                course_errors += 1
+                                message = str(error) if isinstance(error, WorkError) else "网络或资料格式错误"
+                                errors.append(f"{course}/{cid}/{name}: {message}")
                     except NeedsAuth:
                         raise
                     except (WorkError, httpx.HTTPError, ValueError) as error:

@@ -21,7 +21,8 @@ export async function runnerConfig(env:StudyEnv) {
   const c=await config(env), ntu=await settings(env,true);
   const ready=!!ntu.secrets.cookie && ntu.config.courseIds.length>0;
   const last=await env.DB.prepare("SELECT * FROM automation_runs WHERE workflow='ntu-sync' ORDER BY started_at DESC LIMIT 1").first<{id:string;status:string;started_at:string;lease_until:number}>();
-  return {enabled:!!c.enabled,ready,autoAnalyze:!!c.auto_analyze,intervalMinutes:c.interval_minutes,model:c.model || ntu.config.model,
+  const browser=await env.DB.prepare('SELECT user_agent FROM ntu_browser WHERE id=1 AND enabled=1').first<{user_agent:string}>();
+  return {userAgent:browser?.user_agent||undefined,enabled:!!c.enabled,ready,autoAnalyze:!!c.auto_analyze,intervalMinutes:c.interval_minutes,model:c.model || ntu.config.model,
     courseIds:ntu.config.courseIds,cookie:c.enabled?ntu.secrets.cookie:null,glmKey:c.enabled?ntu.secrets.glmKey:null,last,
     // The runner never receives admin sessions, Cloudflare tokens or Telegram credentials.
     baselineCourses:(await env.DB.prepare('SELECT course_id FROM study_course_state').all<{course_id:string}>()).results!.map(r=>r.course_id),processorVersion:PROCESSOR};

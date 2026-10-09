@@ -1,0 +1,36 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import '../../../styles/study.css';
+if(!Astro.locals.adminSession)return Astro.redirect('/admin/login?next=%2Fadmin%2Fntu%2Fbrowser');
+---
+<BaseLayout title="连接学校账号">
+  <meta slot="head" name="robots" content="noindex,nofollow" />
+  <main class="study-shell">
+    <nav><a href="/admin/ntu#settings">← 学校连接与课程选择</a><a href="/admin/study">课程资料</a></nav>
+    <h1>连接学校账号</h1>
+    <p>在服务器的专用浏览器中登录 NTULearn。登录状态保存在服务器，供后续自动同步使用；学校要求重新认证时，仍需在这里完成。</p>
+    <section class="panel">
+      <p id="browser-status" role="status">正在检查浏览器…</p>
+      <p id="browser-host" class="muted"></p>
+      <div class="row"><button id="browser-start" class="primary">打开登录窗口</button><button id="browser-end" disabled>关闭窗口，保留自动维护</button><button id="browser-pause">暂停自动维护</button></div>
+      <p class="muted">每次登录窗口最多开放 20 分钟。暂停只停止浏览器维护，保留登录状态及已下载文件；文件同步开关仍在课程资料页。</p>
+    </section>
+    <section id="browser-view" class="panel" hidden>
+      <p>先点击下面画面中的输入框，再在下方输入内容并发送；随后点击画面中的“下一步”或“登录”。手机验证请按学校提示完成。</p>
+      <p class="muted">输入内容会加密暂存，最多等待 45 秒，取走后删除；不会写入应用日志。画面仅当前后台登录用户可见。</p>
+      <img id="browser-frame" alt="服务器上的学校登录画面" width="1280" height="900" draggable="false" style="width:100%;height:auto;border:1px solid #888;border-radius:8px;cursor:crosshair;" hidden />
+      <form id="browser-input" autocomplete="off">
+        <label>向选中的输入框发送内容<input id="browser-text" type="password" autocomplete="new-password" maxlength="2000" placeholder="账号、密码或验证码" /></label>
+        <label><input id="browser-reveal" type="checkbox" /> 显示本次输入</label>
+        <button type="submit" class="primary">发送输入</button>
+      </form>
+      <div class="row" style="margin-top:1rem;flex-wrap:wrap">
+        <button data-browser-key="Tab">下一个输入框</button><button data-browser-key="Control+A">全选</button><button data-browser-key="Backspace">删除</button><button data-browser-key="Enter">回车</button><button data-browser-key="Escape">取消弹窗</button>
+        <button data-browser-scroll="-600">向上滚动</button><button data-browser-scroll="600">向下滚动</button><button id="browser-home">返回学校首页</button>
+      </div>
+    </section>
+    <p id="browser-feedback" role="status"></p>
+    <p>显示“已连接”后，可关闭登录窗口，再回到学校连接页读取或选择课程。</p>
+  </main>
+</BaseLayout>
+<script>import '../../../scripts/ntu-browser';</script>

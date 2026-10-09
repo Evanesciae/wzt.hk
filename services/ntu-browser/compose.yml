@@ -1,0 +1,30 @@
+services:
+  browser:
+    build: .
+    image: wzt-ntu-browser:local
+    container_name: wzt-ntu-browser
+    restart: unless-stopped
+    init: true
+    env_file: /etc/wzt-ntu/browser.env
+    volumes:
+      - /var/lib/wzt-ntu-browser:/profile
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    shm_size: 256m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./seccomp.json
+    mem_limit: 800m
+    cpus: 1.0
+    pids_limit: 256
+    logging:
+      driver: json-file
+      options: { max-size: 5m, max-file: "2" }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,time; assert time.time()-os.stat('/profile/heartbeat').st_mtime<180"]
+      interval: 60s
+      timeout: 5s
+      start_period: 120s
+      retries: 3

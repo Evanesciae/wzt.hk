@@ -1,5 +1,7 @@
 import tempfile
 import unittest
+from unittest.mock import patch, Mock
+from datetime import datetime, timezone
 from pathlib import Path
 import httpx
 import runner
@@ -43,6 +45,65 @@ class WorkerTests(unittest.TestCase):
         school=runner.School('secret',httpx.Client(transport=httpx.MockTransport(lambda r:httpx.Response(200,content=b'file bytes'))))
         with tempfile.TemporaryDirectory() as folder:
             path=Path(folder)/'file';school.download('/file',path);self.assertEqual(path.read_bytes(),b'file bytes')
+
+    def test_navigation_skips_attachment_api_but_document_errors_are_visible(self):
+        calls=[]
+        def respond(request):
+            calls.append(request)
+            return httpx.Response(400, json={"message":"bad request"})
+        school=runner.School('secret',httpx.Client(transport=httpx.MockTransport(respond)))
+        path='/learn/api/public/v1/courses/c/contents/f'
+        self.assertEqual(school.attachments(path,{'contentHandler':{'id':'resource/x-bb-folder'}}),[])
+        self.assertEqual(calls,[])
+        with self.assertRaises(runner.WorkError):
+            school.attachments(path,{'contentHandler':{'id':'resource/x-bb-document'}})
+        self.assertEqual(len(calls),1)
+
+    def test_incremental_sync_retries_failed_attachment_and_downloads_new_files(self):
+        item={'id':'lesson','title':'Lecture','contentHandler':{'id':'resource/x-bb-document'}}
+        attachments=[{'id':'a','fileName':'a.pdf'},{'id':'b','fileName':'b.pdf'}]
+        known={}; uploads=[]; finishes=[]; downloads=[]; failing={'a'}
+        school=Mock()
+        school.json.side_effect=lambda path: {} if path.endswith('/users/me') else item
+        school.pages.return_value=[item]
+        school.attachments.side_effect=lambda *args:list(attachments)
+        def download(url,path):
+            aid=url.split('/')[-2];downloads.append(aid)
+            if aid in failing:raise runner.WorkError('temporary download failure')
+            path.write_bytes(b'%PDF-1.7 '+aid.encode())
+        school.download.side_effect=download
+        bridge=Mock();bridge.manifest.side_effect=lambda:dict(known)
+        def action(action,**data):
+            if action=='begin':return {'id':'run'}
+            if action=='source':
+                sid=runner.source_id(data['courseId'],data['contentId'],data['attachmentId'])
+                known[sid]={'fingerprint':data['fingerprint'],'version_id':None,'checked_at':datetime.now(timezone.utc).isoformat()}
+                return {'id':sid}
+            if action=='finish':finishes.append(data)
+            return {}
+        bridge.action.side_effect=action
+        def upload(*args,**kwargs):
+            sid=kwargs['headers']['x-source-id'];known[sid]['version_id']='version';uploads.append(sid)
+        bridge.request.side_effect=upload
+        with tempfile.TemporaryDirectory() as folder, patch.object(runner,'School',return_value=school), patch.object(runner.shutil,'disk_usage',return_value=Mock(free=10*1024**3)):
+            settings={'cookie':'secret','courseIds':['course']}
+            self.assertEqual(runner.sync(bridge,settings,Path(folder)),'partial')
+            self.assertEqual(downloads,['a','b'])
+            self.assertEqual(len(uploads),1)
+            self.assertEqual(finishes[-1]['completedCourses'],[])
+            failing.clear();downloads.clear()
+            attachments.append({'id':'c','fileName':'c.pdf'})
+            self.assertEqual(runner.sync(bridge,settings,Path(folder)),'completed')
+            self.assertEqual(downloads,['a','c'])
+            self.assertEqual(finishes[-1]['counts'],{'downloaded':2,'unchanged':1})
+            self.assertEqual(finishes[-1]['completedCourses'],['course'])
+            downloads.clear()
+            runner.sync(bridge,settings,Path(folder))
+            self.assertEqual(downloads,[])
+            self.assertEqual(finishes[-1]['counts'],{'downloaded':0,'unchanged':3})
+            item['modified']='2026-10-09T12:00:00Z'
+            runner.sync(bridge,settings,Path(folder))
+            self.assertEqual(downloads,['a','b','c'])
 
     def test_scanned_pdf_requires_ocr(self):
         from pypdf import PdfWriter
