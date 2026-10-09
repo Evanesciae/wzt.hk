@@ -38,12 +38,14 @@ export const onRequest = defineMiddleware(async (context, next) => {
   const isAdminApi = path.startsWith('/api/admin');
   const isLoginApi = path === '/api/admin/login';
   if (!isAdminPage && !isAdminApi) return nextWithPageCachePolicy();
-  if (adminAuthDisabled()) return nextWithPageCachePolicy();
+  // NTU credentials require a real session even in local auth-bypass mode.
+  const isNtu = ['/admin/ntu','/api/admin/ntu','/admin/study','/api/admin/study'].some(prefix=>path===prefix||path.startsWith(`${prefix}/`));
+  if (adminAuthDisabled() && !isNtu) return nextWithPageCachePolicy();
 
   const session = await getSession(context.cookies);
   if (session) context.locals.adminSession = session;
   if (!session && !isLoginApi) {
-    if (isAdminApi) return Response.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+    if (isAdminApi) return Response.json({ error: 'UNAUTHORIZED' }, { status: 401, headers: { 'Cache-Control': 'private, no-store', 'CDN-Cache-Control': 'no-store' } });
     return context.redirect(`/admin/login?next=${encodeURIComponent(path)}`);
   }
 

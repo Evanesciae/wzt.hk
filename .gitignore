@@ -10,3 +10,5 @@ backups/
 .env.production
 .dev.vars*
 .wrangler/
+__pycache__/
+*.pyc

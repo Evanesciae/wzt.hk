@@ -20,19 +20,24 @@
     "paste:migrate": "wrangler d1 migrations apply DB --remote --config wrangler.pasteboard.jsonc",
     "paste:deploy": "WZT_DEPLOY_TARGET=pasteboard CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false npm run build && CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false wrangler deploy",
     "admin:password": "node ./scripts/hash-password.mjs",
-    "check": "ASTRO_TELEMETRY_DISABLED=1 astro check"
+    "check": "ASTRO_TELEMETRY_DISABLED=1 astro check",
+    "test:ntu": "node --test tests/ntu.test.mjs tests/study.test.mjs"
   },
   "dependencies": {
     "@astrojs/cloudflare": "^14.1.7",
     "astro": "^7.1.6",
+    "katex": "^0.19.0",
     "maplibre-gl": "^5.24.0",
     "marked": "^18.0.5",
+    "sanitize-html": "^2.18.0",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.6",
     "@cloudflare/workers-types": "^5.20260730.1",
+    "@types/katex": "^0.16.8",
     "@types/node": "^26.1.0",
+    "@types/sanitize-html": "^2.16.2",
     "typescript": "^5.9.0",
     "wrangler": "^4.115.0"
   }

@@ -1,0 +1,148 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { env } from 'cloudflare:workers';
+import { overview, type NtuEnv } from '../../server/ntu/service';
+import { singapore } from '../../server/ntu/core';
+if (!Astro.locals.adminSession) return Astro.redirect('/admin/login?next=%2Fadmin%2Fntu');
+const data = await overview(env as unknown as NtuEnv);
+const {config,configured,courses,items} = data;
+const state = data.state as {last_attempt:string|null;last_success:string|null;error:string|null;warning:string|null;lock_until:number};
+const counts = data.counts as {total:number;unread:number;upcoming:number};
+const selected = new Set(config.courseIds);
+const next = items.filter(i=>selected.has(i.course_id) && i.due_at && Date.parse(i.due_at)>Date.now()).sort((a,b)=>a.due_at!.localeCompare(b.due_at!)).slice(0,4);
+const names = new Map(courses.map(c=>[c.id,c.name]));
+const pending = (data.delivery as {status:string;count:number}[]).find(d=>d.status==='pending')?.count ?? 0;
+---
+<BaseLayout title="NTU 通知中心" bare brandHref="/admin">
+  <meta slot="head" name="robots" content="noindex,nofollow" />
+  <div class="container ntu-shell">
+    <a class="back" href="/admin">← 管理中心</a>
+    <a class="back" href="/admin/study" style="margin-left:20px">私有课程资料 →</a>
+    <header class="ntu-header">
+      <div><p class="eyebrow">YOUR CAMPUS, IN FOCUS</p><h1>NTU 通知中心<span class="private">私人</span></h1><p class="subtitle">课程动态及时知晓，重要安排不再错过。</p></div>
+      <button type="button" class="primary-button" data-action="sync" disabled={!configured.cookie || !selected.size}>立即同步 <span aria-hidden="true">↻</span></button>
+    </header>
+    <div class:list={['health',{'attention':state.error}]}><span class="dot"></span><strong>{state.error?'同步需要检查':state.lock_until>Date.now()?'正在同步':config.enabled?'自动同步已开启':'自动同步已暂停'}</strong><span>{state.last_success?`最近成功：${singapore(state.last_success)}`:'完成下方设置后，开始第一次同步。'}</span><a href="#settings">管理设置 ↓</a></div>
+    {(state.error || state.warning) && <div class="notice warning" role="status">{state.error || state.warning}</div>}
+    {!data.encryptionReady && <div class="notice warning">服务器凭据加密尚未就绪，请联系维护者后再填写凭据。</div>}
+    <div class="stats"><div><span>未读动态</span><strong>{counts.unread || 0}<small>条</small></strong></div><div><span>即将到期</span><strong>{counts.upcoming || 0}<small>项</small></strong></div><div><span>关注课程</span><strong>{selected.size}<small>门</small></strong></div><div><span>等待推送</span><strong>{pending}<small>条</small></strong></div></div>
+    <div class="workspace">
+      <section class="feed">
+        <div class="section-title"><h2>近期安排</h2><span>新加坡时间 · UTC+8</span></div>
+        {next.length ? <div class="upcoming">{next.map(i=><a href={i.source_url} target="_blank" rel="noopener noreferrer"><span class="calendar-mark">{new Date(i.due_at!).toLocaleDateString('en-SG',{timeZone:'Asia/Singapore',day:'2-digit',month:'short'})}</span><div><strong>{i.title}</strong><small>{singapore(i.due_at!)} · {names.get(i.course_id)}</small></div><span>↗</span></a>)}</div> : <div class="empty compact"><span aria-hidden="true">◷</span><h3>暂无近期安排</h3><p>同步后，这里会显示未来 120 天的课程日历。</p></div>}
+        <div class="section-title feed-title"><h2>课程动态</h2><span>最近 200 条</span></div>
+        <div class="filters"><label class="sr-only" for="filter">筛选动态</label><select id="filter"><option value="all">全部动态</option><option value="unread">未读</option><option value="important">重要事项</option><option value="calendar">日历安排</option></select><label class="sr-only" for="search">搜索课程动态</label><input id="search" type="search" placeholder="搜索课程或通知…" /></div>
+        <div id="items">
+          {items.map(item=><article class="item" data-item={item.id} data-read={String(!!item.read_at)} data-important={String(!!item.important)} data-kind={item.kind}>
+            <div class="item-meta"><span>{names.get(item.course_id) ?? item.course_id}</span>{item.important && <b>重要</b>}{!item.read_at && <i title="未读" aria-label="未读"></i>}</div>
+            <h3>{item.title}</h3>{item.due_at && <p class="date">◷ {singapore(item.due_at)} · 新加坡</p>}
+            <p class="summary">{item.summary || item.body.slice(0,450) || '请打开课程查看详情。'}</p>
+            <small class="summary-label">{item.summary?'AI 中文摘要 · 以原文为准':item.ai_status==='failed'?'摘要暂不可用 · 显示原文':config.aiEnabled?'原文 · 等待摘要':'原文摘录'}</small>
+            <details class="original"><summary>查看完整原文</summary><p>{item.body || '此日历项目没有正文。'}</p></details>
+            <footer><time>{item.source_date ? singapore(item.source_date):singapore(item.updated_at)}</time><div>{!item.read_at && <button type="button" data-read-id={item.id}>标为已读</button>}<a href={item.source_url} target="_blank" rel="noopener noreferrer">打开课程 ↗</a></div></footer>
+          </article>)}
+        </div>
+        <div class="empty" id="feed-empty" hidden={items.length>0}><span aria-hidden="true">✉</span><h3>{items.length?'没有匹配的动态':'你的课程动态会出现在这里'}</h3><p>{items.length?'试试其他筛选或关键词。':'先连接 NTULearn 并选择课程。首次同步只建立记录，不推送旧公告。'}</p></div>
+        <p class="footnote">数据来自 NTULearn 公告与日历，不保证覆盖其他考试系统。正文中的考试日期可在摘要中查看；24 小时提醒仅依据日历中的明确时间。</p>
+      </section>
+      <aside id="settings">
+        <div class="section-title"><h2>连接与设置</h2><span>仅你可见</span></div>
+        <form id="settings-form" data-revision={data.revision}>
+          <details class="setting-card" open={!configured.cookie || !selected.size}>
+            <summary><span class="step">01</span><div><strong>NTULearn</strong><small>{configured.cookie?'已保存登录凭据':'连接你的课程'}</small></div><span class="chevron">⌄</span></summary>
+            <div class="card-body">
+              <p>登录 NTULearn 后，复制 <code>BbRouter</code> Cookie 的值。过期时在这里更新。</p>
+              <label>登录 Cookie<input name="cookie" type="password" autocomplete="new-password" maxlength="8000" placeholder={configured.cookie?'已保存 · 留空保持不变':'粘贴 BbRouter 的值'} /></label>
+              <details class="help"><summary>如何找到 Cookie？</summary><p>在电脑浏览器打开 <a href="https://ntulearn.ntu.edu.sg" target="_blank" rel="noopener noreferrer">NTULearn ↗</a> 并登录。打开开发者工具 → Application / Storage → Cookies → ntulearn.ntu.edu.sg，复制 BbRouter 的 Value。此凭据仅发送给 NTULearn，不会发送给 GLM。</p></details>
+              <button type="button" class="secondary" data-action="courses" data-save-first>保存并读取课程</button>
+              <fieldset class="courses"><legend>关注的课程 <small>最多 20 门</small></legend>{courses.length?courses.map(c=><label class="check"><input type="checkbox" name="courseId" value={c.id} checked={selected.has(c.id)} /><span>{c.name}<small>{c.code}</small></span></label>):<p class="hint">读取课程后，在这里勾选要关注的课程。</p>}</fieldset>
+              <label class="check subtle"><input type="checkbox" name="clear" value="cookie" />清除已保存的 Cookie</label>
+            </div>
+          </details>
+          <details class="setting-card" open={!configured.telegramToken || !config.chatId}>
+            <summary><span class="step">02</span><div><strong>Telegram</strong><small>{config.telegramEnabled?'推送已开启':'把重要动态送到手机'}</small></div><span class="chevron">⌄</span></summary>
+            <div class="card-body"><p>向 <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">@BotFather ↗</a> 发送 /newbot 创建机器人，复制 Token；然后向你的机器人发送 /start。</p>
+              <label>Bot Token<input name="telegramToken" type="password" autocomplete="new-password" placeholder={configured.telegramToken?'已保存 · 留空保持不变':'123456789:…'} /></label>
+              <label>Chat ID<input name="chatId" value={config.chatId} inputmode="numeric" placeholder="你的私人聊天 ID" /></label>
+              <button type="button" class="secondary" data-action="telegram-chats" data-save-first>保存并查找我的聊天</button><div id="chat-options"></div>
+              <label class="check"><input type="checkbox" name="telegramEnabled" checked={config.telegramEnabled} /><span>启用 Telegram 推送</span></label>
+              <button type="button" class="secondary" data-action="telegram-test" data-save-first>保存并发送测试消息</button>
+              <label class="check subtle"><input type="checkbox" name="clear" value="telegramToken" />清除 Bot Token</label>
+            </div>
+          </details>
+          <details class="setting-card">
+            <summary><span class="step">03</span><div><strong>智谱 GLM 摘要</strong><small>{config.aiEnabled?'中文摘要已开启':'可选 · 不影响原文提醒'}</small></div><span class="chevron">⌄</span></summary>
+            <div class="card-body"><div class="notice">Coding Plan 订阅不等于网站通用 API 额度。这里使用智谱通用 API，可能按量计费。<a href="https://docs.bigmodel.cn/cn/coding-plan/overview" target="_blank" rel="noopener noreferrer">查看说明 ↗</a></div>
+              <label>智谱 API Key<input name="glmKey" type="password" autocomplete="new-password" placeholder={configured.glmKey?'已保存 · 留空保持不变':'填写智谱开放平台 API Key'} /></label>
+              <label>模型名称<input name="model" value={config.model} placeholder="glm-4.7-flash" pattern="glm-[a-zA-Z0-9.\-]+" /></label>
+              <p class="hint">填写你账户可用的模型。测试会发起一次 API 调用。</p>
+              <label class="check"><input type="checkbox" name="aiEnabled" checked={config.aiEnabled} /><span>将公告正文发给智谱生成中文摘要</span></label>
+              <button type="button" class="secondary" data-action="glm-test" data-save-first>保存并测试摘要</button>
+              <button type="button" class="text-button" data-action="retry-ai">重试失败的摘要</button>
+              <label class="check subtle"><input type="checkbox" name="clear" value="glmKey" />清除 API Key</label>
+            </div>
+          </details>
+          <details class="setting-card" open>
+            <summary><span class="step">04</span><div><strong>提醒偏好</strong><small>按你的节奏接收消息</small></div><span class="chevron">⌄</span></summary>
+            <div class="card-body">
+              <label class="check"><input type="checkbox" name="enabled" checked={config.enabled} /><span>启用自动同步</span></label>
+              <div class="pair"><label>检查频率<select name="interval">{[30,60,120].map(n=><option value={n} selected={config.interval===n}>每 {n} 分钟</option>)}</select></label><label>普通公告汇总时间<select name="digestHour">{Array.from({length:24},(_,n)=><option value={n} selected={config.digestHour===n}>{String(n).padStart(2,'0')}:00</option>)}</select></label></div>
+              <label>推送方式<select name="mode"><option value="digest" selected={config.mode==='digest'}>重要事项及时推送，普通公告每日汇总</option><option value="all" selected={config.mode==='all'}>所有新动态同步后推送</option></select></label>
+              <label class="check"><input type="checkbox" name="reminder24" checked={config.reminder24} /><span>日历事项进入 24 小时内时提醒一次</span></label>
+              <p class="hint">时间均为新加坡时间。提醒在下一次同步时发出；首次同步不推送旧公告，但会提醒临近事项。暂停自动同步也会暂停自动推送。</p>
+            </div>
+          </details>
+          <div class="save-bar"><button type="submit" class="primary-button" disabled={!data.encryptionReady}>保存所有设置</button><small>凭据加密保存，页面不会回显。</small></div>
+        </form>
+      </aside>
+    </div>
+    <div id="feedback" class="feedback" role="status" aria-live="polite" hidden></div>
+  </div>
+</BaseLayout>
+<script>
+  const form = document.querySelector<HTMLFormElement>('#settings-form')!;
+  const feedback = document.querySelector<HTMLElement>('#feedback')!;
+  const csrf = document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ?? '';
+  let busy=false;
+  function show(text:string,error=false) {feedback.textContent=text;feedback.hidden=false;feedback.classList.toggle('error',error);}
+  async function api(body:Record<string,unknown>) {
+    const r=await fetch('/api/admin/ntu',{method:'POST',headers:{'content-type':'application/json','x-csrf-token':csrf},body:JSON.stringify(body)});
+    const data=await r.json(); if(!r.ok)throw new Error(data.error || '操作失败，请重新登录后重试。'); return data;
+  }
+  async function save() {
+    if(!form.reportValidity()) throw new Error('请检查设置中的输入格式。');
+    const d=new FormData(form);const flag=(n:string)=>d.get(n)==='on';
+    const result=await api({action:'save',revision:Number(form.dataset.revision),config:{
+      enabled:flag('enabled'),telegramEnabled:flag('telegramEnabled'),aiEnabled:flag('aiEnabled'),reminder24:flag('reminder24'),
+      interval:Number(d.get('interval')),digestHour:Number(d.get('digestHour')),mode:d.get('mode'),model:String(d.get('model')).trim(),chatId:String(d.get('chatId')).trim(),courseIds:d.getAll('courseId'),
+    },secrets:{cookie:d.get('cookie'),telegramToken:d.get('telegramToken'),glmKey:d.get('glmKey')},clear:d.getAll('clear')});
+    form.dataset.revision=String(result.revision);
+    for(const name of ['cookie','telegramToken','glmKey']) {const input=form.elements.namedItem(name) as HTMLInputElement;if(input.value)input.placeholder='已保存 · 留空保持不变';input.value='';}
+    form.querySelectorAll<HTMLInputElement>('[name="clear"]').forEach(i=>i.checked=false);
+  }
+  async function perform(action:()=>Promise<void>) {
+    if(busy)return;busy=true;document.documentElement.classList.add('ntu-busy');show('正在处理，请稍候…');
+    try {await action();}catch(e){show(e instanceof Error?e.message:'网络连接失败，请稍后重试。',true);}finally{busy=false;document.documentElement.classList.remove('ntu-busy');}
+  }
+  form.addEventListener('submit',e=>{e.preventDefault();void perform(async()=>{await save();show('设置已保存。');location.reload();});});
+  document.querySelectorAll<HTMLButtonElement>('[data-action]').forEach(button=>button.addEventListener('click',()=>void perform(async()=>{
+    if(button.hasAttribute('data-save-first'))await save();
+    const action=button.dataset.action!;const result=await api({action});show(result.message);
+    if(action==='courses' || action==='sync')location.reload();
+    if(action==='telegram-chats') {
+      const area=document.querySelector('#chat-options')!;area.replaceChildren();
+      for(const c of result.chats) {const b=document.createElement('button');b.type='button';b.className='secondary';b.textContent=`选择 ${c.name} (${c.id})`;b.addEventListener('click',()=>{(form.elements.namedItem('chatId') as HTMLInputElement).value=c.id;show('已选择聊天，请保存设置或发送测试消息。');});area.append(b);}
+    }
+  })));
+  document.querySelectorAll<HTMLButtonElement>('[data-read-id]').forEach(button=>button.addEventListener('click',()=>void perform(async()=>{await api({action:'read',id:button.dataset.readId});button.closest<HTMLElement>('.item')!.dataset.read='true';button.closest('.item')?.querySelector('i')?.remove();button.remove();show('已标记为已读。');filter();})));
+  function filter() {
+    const value=document.querySelector<HTMLSelectElement>('#filter')!.value;const query=document.querySelector<HTMLInputElement>('#search')!.value.trim().toLowerCase();let visible=0;
+    document.querySelectorAll<HTMLElement>('.item').forEach(item=>{item.hidden=!(value==='all'||(value==='unread'&&item.dataset.read==='false')||(value==='important'&&item.dataset.important==='true')||item.dataset.kind===value)||!item.textContent?.toLowerCase().includes(query);if(!item.hidden)visible++;});
+    document.querySelector<HTMLElement>('#feed-empty')!.hidden=visible>0;
+  }
+  document.querySelector('#filter')?.addEventListener('change',filter);document.querySelector('#search')?.addEventListener('input',filter);
+</script>
+<style>
+  .primary-button{background:#376a5c;color:#fff;border:0;cursor:pointer;margin-top:0;gap:8px}
+  .ntu-shell{padding-top:32px;padding-bottom:36px}.back{font-size:13px;color:var(--text-3)}.ntu-header{display:flex;align-items:center;justify-content:space-between;gap:24px;margin:24px 0}.ntu-header h1{font-size:34px;letter-spacing:-.04em;margin:5px 0;display:flex;align-items:center;gap:14px}.eyebrow{font-size:10px;letter-spacing:.17em;color:var(--accent);font-weight:700;margin:0}.subtitle{margin:0;color:var(--text-2)}.private{font-size:11px;font-weight:500;letter-spacing:0;border:1px solid var(--line);padding:2px 8px;border-radius:20px;color:var(--text-3)}.health{display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:14px 18px;border:1px solid var(--line);background:var(--bg-soft);border-radius:10px;font-size:12px}.health>span:not(.dot){color:var(--text-3)}.health a{margin-left:auto;color:var(--accent)}.dot{width:7px;height:7px;background:var(--accent);border-radius:50%}.health.attention .dot{background:#c27b2d}.stats{display:grid;grid-template-columns:repeat(4,1fr);margin:25px 0 38px;border-bottom:1px solid var(--line);padding-bottom:26px}.stats>div{padding:0 22px;border-right:1px solid var(--line)}.stats>div:first-child{padding-left:0}.stats>div:last-child{border:0}.stats span{font-size:12px;color:var(--text-3)}.stats strong{display:block;font-size:31px;line-height:1.3;font-weight:550;margin-top:8px}.stats small{font-size:11px;color:var(--text-3);margin-left:8px;font-weight:400}.workspace{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(330px,1fr);gap:42px}.section-title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:16px}.section-title h2{font-size:17px;margin:0}.section-title>span{font-size:11px;color:var(--text-3)}.empty{padding:45px 25px;text-align:center;border:1px dashed var(--line-strong);border-radius:10px;color:var(--text-3)}.empty>span{font-size:30px}.empty h3{font-size:15px;color:var(--text-2);margin:10px 0 5px}.empty p{font-size:12px;margin:0;line-height:1.8}.compact{padding:24px}.upcoming{border:1px solid var(--line);border-radius:10px;overflow:hidden}.upcoming>a{display:flex;align-items:center;gap:14px;padding:16px;border-bottom:1px solid var(--line)}.upcoming>a:last-child{border:0}.upcoming strong{font-size:13px}.upcoming small{display:block;font-size:11px;color:var(--text-3)}.upcoming>a>span:last-child{margin-left:auto}.calendar-mark{font-size:12px;color:var(--accent);background:var(--accent-soft);padding:8px;border-radius:7px;white-space:nowrap}.feed-title{margin-top:32px}.filters{display:flex;gap:10px;margin-bottom:15px}.filters input{min-width:0;flex:1}.filters select{max-width:135px}.item{border:1px solid var(--line);border-radius:10px;padding:20px;margin-bottom:14px;overflow-wrap:anywhere}.item-meta{display:flex;gap:8px;align-items:center;font-size:10px;color:var(--text-3)}.item-meta span{flex:1}.item-meta b{font-size:10px;color:var(--accent);font-weight:500;background:var(--accent-soft);padding:2px 6px;border-radius:4px}.item-meta i{width:6px;height:6px;background:var(--accent);border-radius:50%}.item h3{font-size:16px;margin:10px 0}.summary{font-size:13px;color:var(--text-2);white-space:pre-line;line-height:1.85;margin:8px 0}.summary-label{font-size:10px;color:var(--text-3)}.date{font-size:12px;color:var(--accent)}.item footer{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:16px;padding-top:12px;border-top:1px solid var(--line);font-size:10px;color:var(--text-3)}.item footer div{display:flex;gap:12px}.item footer button{font-size:10px;border:0;background:none;padding:0;color:var(--accent);cursor:pointer}.item footer a{color:var(--accent)}.original{margin-top:12px;font-size:11px;color:var(--text-3)}.original p{white-space:pre-wrap;font-size:12px;color:var(--text-2)}.footnote{font-size:11px;color:var(--text-3);line-height:1.9;margin-top:20px}.setting-card{border:1px solid var(--line);border-radius:10px;margin-bottom:12px;background:var(--bg)}.setting-card>summary{display:flex;align-items:center;gap:12px;cursor:pointer;padding:17px;list-style:none}.setting-card>summary::-webkit-details-marker{display:none}.step{background:var(--bg-soft);color:var(--text-3);font-size:11px;padding:6px 8px;border-radius:6px}.setting-card strong{display:block;font-size:13px}.setting-card summary small{display:block;font-size:11px;color:var(--text-3);margin-top:2px}.chevron{margin-left:auto;color:var(--text-3)}.setting-card[open] .chevron{transform:rotate(180deg)}.card-body{padding:0 18px 18px}.card-body>p{font-size:12px;color:var(--text-2);line-height:1.8;margin:0 0 14px}.card-body a{color:var(--accent);text-decoration:underline}.card-body label:not(.check){display:block;font-size:12px;color:var(--text-2);margin-bottom:12px}input:not([type=checkbox]),select{width:100%;border:1px solid var(--line-strong);border-radius:6px;background:var(--bg);color:var(--text);padding:9px 10px;font-size:12px;min-height:38px}.card-body label>input:not([type=checkbox]),.card-body label>select{margin-top:5px}.check{display:flex;align-items:flex-start;gap:8px;font-size:12px;margin:14px 0;cursor:pointer}.check input{margin-top:4px;accent-color:var(--accent);flex-shrink:0}.check small{display:block;color:var(--text-3);font-size:10px}.subtle{font-size:10px;color:var(--text-3)}.secondary{padding:8px 12px;border:1px solid var(--line-strong);background:var(--bg-soft);color:var(--text);border-radius:6px;font-size:11px;cursor:pointer;margin:4px 0}.help{font-size:11px;color:var(--text-3);margin:10px 0}.help p{line-height:1.9}.courses{margin:18px 0 0;padding:12px 10px;border:1px solid var(--line);border-radius:6px;max-height:270px;overflow:auto}.courses legend{font-size:12px;padding:0 5px}.courses legend small{font-size:10px;color:var(--text-3)}.courses .check{margin:9px 0}.hint{font-size:10px!important;color:var(--text-3)!important;line-height:1.8!important}.pair{display:grid;grid-template-columns:1fr 1fr;gap:10px}.notice{background:var(--bg-soft);border:1px solid var(--line);border-radius:7px;padding:12px;font-size:11px;color:var(--text-2);margin-bottom:15px;white-space:pre-line}.warning{margin-top:12px;border-color:#b58143;color:#a16b2b}.save-bar{padding-top:8px;display:flex;flex-direction:column;gap:10px;text-align:center}.save-bar .primary-button{width:100%;justify-content:center}.save-bar small{font-size:10px;color:var(--text-3)}.feedback{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);width:max-content;max-width:calc(100% - 32px);z-index:100;background:var(--text);color:var(--bg);padding:13px 22px;border-radius:9px;box-shadow:var(--shadow);font-size:13px;white-space:pre-line}.feedback.error{background:#8e352e;color:#fff}button:disabled{opacity:.45;cursor:not-allowed}:global(.ntu-busy button){pointer-events:none;opacity:.5}input:focus-visible,select:focus-visible,summary:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}#settings{scroll-margin-top:85px}code{font-size:11px}@media(max-width:820px){.workspace{grid-template-columns:1fr;gap:35px}.ntu-header h1{font-size:27px}.ntu-header{align-items:flex-start}.ntu-header .primary-button{font-size:12px;white-space:nowrap}.stats>div{padding:0 12px}.health a{margin-left:0}.stats strong{font-size:27px}#settings{grid-row:1}.ntu-header .subtitle{font-size:12px}}@media(max-width:450px){.ntu-header{flex-wrap:wrap}.stats span{font-size:10px}.stats>div{padding:0 8px}.stats small{margin-left:4px}.stats strong{font-size:24px}.section-title>span{font-size:10px}}
+</style>
