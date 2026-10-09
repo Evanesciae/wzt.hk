@@ -39,7 +39,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
   const isLoginApi = path === '/api/admin/login';
   if (!isAdminPage && !isAdminApi) return nextWithPageCachePolicy();
   // NTU credentials require a real session even in local auth-bypass mode.
-  const isNtu = path === '/admin/ntu' || path.startsWith('/admin/ntu/') || path === '/api/admin/ntu' || path.startsWith('/api/admin/ntu/');
+  const isNtu = ['/admin/ntu','/api/admin/ntu','/admin/study','/api/admin/study'].some(prefix=>path===prefix||path.startsWith(`${prefix}/`));
   if (adminAuthDisabled() && !isNtu) return nextWithPageCachePolicy();
 
   const session = await getSession(context.cookies);

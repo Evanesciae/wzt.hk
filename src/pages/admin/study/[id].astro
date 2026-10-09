@@ -1,0 +1,30 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import {env} from 'cloudflare:workers';
+import {type StudyEnv,type Source} from '../../../server/study';
+import {studyMarkdown} from '../../../server/study-markdown';
+import {singapore} from '../../../server/ntu/core';
+import '../../../styles/study.css';
+import 'katex/dist/katex.min.css';
+if(!Astro.locals.adminSession)return Astro.redirect('/admin/login?next='+encodeURIComponent(Astro.url.pathname));
+const e=env as unknown as StudyEnv;
+const s=await e.DB.prepare('SELECT * FROM study_sources WHERE id=?').bind(Astro.params.id??'').first<Source>();
+if(!s)return new Response('资料不存在',{status:404});
+const versions=(await e.DB.prepare('SELECT * FROM study_versions WHERE source_id=? ORDER BY created_at DESC').bind(s.id).all<Record<string,any>>()).results ?? [];
+const notes=(await e.DB.prepare('SELECT * FROM study_notes WHERE source_id=? ORDER BY created_at DESC').bind(s.id).all<Record<string,any>>()).results ?? [];
+const current=notes.find(n=>n.version_id===s.version_id);
+---
+<BaseLayout title={s.title} bare brandHref="/admin">
+  <meta slot="head" name="robots" content="noindex,nofollow" />
+  <main class="study-shell"><nav><a href="/admin/study">← 课程资料</a><a href={s.source_url} target="_blank" rel="noopener noreferrer">学校原页面 ↗</a></nav>
+    <header><span class="badge">私人资料</span><h1>{s.title}</h1><p class="muted">{s.kind==='assignment'?'Assignment':'课程资料'} · 最近更新 {singapore(s.updated_at)}</p></header>
+    {s.due_at&&<section class="panel"><strong>截止：{singapore(s.due_at)}</strong><p><a class="button" href={`/api/admin/study/calendar/${s.id}`}>下载日历事项</a></p><p class="muted">下载后导入你的日历；不会自动写入任何日历账户。</p></section>}
+    <section class="panel"><h2>原文件</h2><div class="row">{s.version_id?<><a class="button" href={`/api/admin/study/files/${s.version_id}`}>下载当前原件</a><button data-analyze={s.version_id}>{current?'当前版本已生成笔记':'加入分析队列'}</button></>:<p>原件尚未下载成功，请查看同步记录。</p>}</div><p class="muted">分析会把可提取文字发送给智谱通用 API。扫描件会标记为需要识别，不会伪造完整笔记。</p>
+      {s.body&&<details><summary>课程页面说明</summary><p class="body">{s.body}</p></details>}
+    </section>
+    {current?<article class="note" set:html={studyMarkdown(current.markdown)} />:<p class="empty">当前版本还没有学习笔记。分析进度可在课程资料首页查看。</p>}
+    <details class="panel"><summary>原件版本与历史笔记</summary>{versions.map(v=><div class="entry"><a href={`/api/admin/study/files/${v.id}`}>{v.filename}</a><p class="muted">{singapore(v.created_at)} · {(v.size/1024).toFixed(0)} KB · {v.id===s.version_id?'当前版本':'历史版本'}</p>{notes.filter(n=>n.version_id===v.id&&n.id!==current?.id).map(n=><details><summary>{n.model} · {singapore(n.created_at)} 的笔记</summary><article class="note" set:html={studyMarkdown(n.markdown)} /></details>)}</div>)}</details>
+    <div id="feedback" role="status" hidden></div>
+  </main>
+</BaseLayout>
+<script>import '../../../scripts/study';</script>

@@ -1,0 +1,17 @@
+const csrf=document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content??'';
+const feedback=document.querySelector<HTMLElement>('#feedback')!;
+let busy=false;
+async function send(body:Record<string,unknown>){
+  if(busy)return;busy=true;
+  document.querySelectorAll<HTMLButtonElement>('.study-shell button').forEach(b=>b.disabled=true);
+  feedback.hidden=false;feedback.textContent='正在保存…';
+  try{
+    const r=await fetch('/api/admin/study',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify(body)});
+    const data=await r.json();if(!r.ok)throw new Error(data.error??'操作失败');
+    location.reload();
+  }catch(e){feedback.textContent=e instanceof Error?e.message:'网络连接失败，请重试。';}
+  finally{busy=false;document.querySelectorAll<HTMLButtonElement>('.study-shell button').forEach(b=>b.disabled=false);}
+}
+const form=document.querySelector<HTMLFormElement>('#study-settings');
+form?.addEventListener('submit',e=>{e.preventDefault();const d=new FormData(form);void send({action:'save',revision:Number(form.dataset.revision),enabled:d.has('enabled'),autoAnalyze:d.has('autoAnalyze'),intervalMinutes:Number(d.get('intervalMinutes')),dailyJobs:Number(d.get('dailyJobs')),model:String(d.get('model')).trim()});});
+document.querySelectorAll<HTMLButtonElement>('[data-analyze]').forEach(b=>b.addEventListener('click',()=>void send({action:'analyze',versionId:b.dataset.analyze})));

@@ -1,0 +1,26 @@
+services:
+  runner:
+    build: .
+    image: wzt-ntu-runner:local
+    container_name: wzt-ntu-runner
+    restart: unless-stopped
+    env_file: /etc/wzt-ntu/runner.env
+    volumes:
+      - /var/lib/wzt-ntu:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 768m
+    cpus: 0.75
+    pids_limit: 64
+    logging:
+      driver: json-file
+      options: { max-size: 5m, max-file: "2" }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,time; assert time.time()-os.stat('/data/heartbeat').st_mtime<2400"]
+      interval: 60s
+      timeout: 5s
+      start_period: 120s
+      retries: 3

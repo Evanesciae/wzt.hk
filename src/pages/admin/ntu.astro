@@ -17,6 +17,7 @@ const pending = (data.delivery as {status:string;count:number}[]).find(d=>d.stat
   <meta slot="head" name="robots" content="noindex,nofollow" />
   <div class="container ntu-shell">
     <a class="back" href="/admin">← 管理中心</a>
+    <a class="back" href="/admin/study" style="margin-left:20px">私有课程资料 →</a>
     <header class="ntu-header">
       <div><p class="eyebrow">YOUR CAMPUS, IN FOCUS</p><h1>NTU 通知中心<span class="private">私人</span></h1><p class="subtitle">课程动态及时知晓，重要安排不再错过。</p></div>
       <button type="button" class="primary-button" data-action="sync" disabled={!configured.cookie || !selected.size}>立即同步 <span aria-hidden="true">↻</span></button>
