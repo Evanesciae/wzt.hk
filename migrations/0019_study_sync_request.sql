@@ -1,0 +1,1 @@
+ALTER TABLE study_settings ADD COLUMN sync_requested INTEGER NOT NULL DEFAULT 0;

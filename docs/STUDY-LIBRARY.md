@@ -8,6 +8,8 @@ The browser uploads files sequentially, displays individual progress/failures, s
 
 The previous school-sync settings and recent runs are at `/admin/study/settings`; the school connection/announcements remain at `/admin/ntu`. Neither is a prerequisite for manual uploading.
 
+The settings page has a one-shot “立即同步” action. Migration 0019 adds a pending request that lets the existing runner bypass its interval and expired-cookie suppression once, without enabling scheduled sync. Active runs remain exclusive; finishing clears the request. Deploy the updated runner too. The UI refreshes pending results every 15 seconds. This uses the server's saved school session, not the user's unrelated local browser session.
+
 This increment supports individual and multi-file selection/drop, not recursive folder selection, automatic laptop-folder watching, full-text extraction/search or offline editing. Those can be added to the same library without coupling it back to school authentication.
 
 Validation: `npm run test:ntu`, `npm run check`, `npm run build`. Regression tests cover no-school-login upload, nested folders, same-name versioning, deduplication, move followed by upload, private download, course boundary checks and size limits. Apply migration 0018 before deploying. On rollback retain additive tables/columns and private objects; restoring an old full database would discard newer user uploads.

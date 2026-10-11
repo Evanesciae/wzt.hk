@@ -14,7 +14,13 @@ const svc=await import(pathToFileURL(join(dir,'study.js'))),ntu=await import(pat
 const {studyMarkdown}=await import(pathToFileURL(join(dir,'study-markdown.js')));
 const browser=await import(pathToFileURL(join(dir,'ntu/browser.js')));
 const library=await import(pathToFileURL(join(dir,'study-library.js')));
-const schema=(await Promise.all(['0015_ntu_notifications.sql','0016_study_pipeline.sql','0017_ntu_browser.sql','0018_study_library.sql'].map(p=>readFile('migrations/'+p,'utf8')))).join('\n');
+const schema=(await Promise.all(['0015_ntu_notifications.sql','0016_study_pipeline.sql','0017_ntu_browser.sql','0018_study_library.sql','0019_study_sync_request.sql'].map(p=>readFile('migrations/'+p,'utf8')))).join('\n');
+test('manual sync bypasses schedule once while preserving paused automatic sync',async()=>{
+ const f=await fixture();await svc.finishRun(f.env,{runId:f.run.id,status:'completed'});f.db.exec('UPDATE study_settings SET enabled=0');
+ await svc.requestSync(f.env);await svc.requestSync(f.env);const c=await svc.runnerConfig(f.env);assert.equal(c.syncRequested,true);assert.equal(c.enabled,true);assert.equal(c.glmKey,null);
+ const r=await svc.beginRun(f.env);assert.ok(r.id);assert.equal((await svc.beginRun(f.env)).id,null);await svc.liveRun(f.env,r.id);
+ await svc.finishRun(f.env,{runId:r.id,status:'needs_auth'});assert.equal((await svc.runnerConfig(f.env)).enabled,false);assert.equal((await svc.config(f.env)).sync_requested,0);f.db.close();
+});
 after(()=>rm(dir,{recursive:true,force:true}));
 async function fixture(){
   const db=new DatabaseSync(':memory:');db.exec(schema);const objects=new Map();

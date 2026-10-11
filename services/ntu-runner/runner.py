@@ -465,7 +465,7 @@ def main():
             if state == "ready":
                 blocked = root / "expired-cookie.sha256"
                 cookie_hash = digest(settings["cookie"])
-                if not blocked.exists() or blocked.read_text() != cookie_hash:
+                if settings.get("syncRequested") or not blocked.exists() or blocked.read_text() != cookie_hash:
                     result = sync(bridge, settings, root)
                     if result == "needs_auth":
                         blocked.write_text(cookie_hash)
