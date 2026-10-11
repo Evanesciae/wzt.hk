@@ -18,11 +18,13 @@ const state=data.state as {last_success:string|null;error:string|null};
     <header><h1>学校连接 <span class="badge">私人</span></h1><p class="muted">连接 NTULearn，选择需要保存的课程。课件和公告集中在这里，供后续 Muse 使用。</p></header>
     <section class="panel" id="settings">
       <h2>1. 连接学校账号</h2>
+      <p><a class="button" href="/admin/ntu/browser">打开服务器浏览器登录学校 →</a></p>
+      <p class="muted">推荐使用专用浏览器登录，无需复制 Cookie。连接成功后回到这里读取课程。</p>
       <p class="muted">{configured.cookie?'已保存学校登录凭据，过期后可在这里更新。':'尚未连接学校账号。'}</p>
       {!data.encryptionReady&&<p class="error">凭据加密尚未就绪，请暂勿填写。</p>}
       <form id="connection" data-revision={data.revision}>
-        <label>学校登录 Cookie<input name="cookie" type="password" autocomplete="new-password" maxlength="8000" placeholder={configured.cookie?'已保存 · 留空保持不变':'粘贴 BbRouter 的值'} /></label>
-        <details><summary>如何找到 Cookie？</summary><p class="muted">在 Chrome 登录 NTULearn。Mac 按 Option + Command + I，Windows 按 F12，进入 Application → Cookies → https://ntulearn.ntu.edu.sg，找到 BbRouter，把 Value 粘贴到上方。凭据加密保存，页面不会回显。</p></details>
+        <details><summary>备用方式：手动填写 Cookie</summary><label>学校登录 Cookie<input name="cookie" type="password" autocomplete="new-password" maxlength="8000" placeholder={configured.cookie?'已保存 · 留空保持不变':'粘贴 BbRouter 的值'} /></label>
+        <details><summary>如何找到 Cookie？</summary><p class="muted">在 Chrome 登录 NTULearn。Mac 按 Option + Command + I，Windows 按 F12，进入 Application → Cookies → https://ntulearn.ntu.edu.sg，找到 BbRouter，把 Value 粘贴到上方。凭据加密保存，页面不会回显。</p></details></details>
         <p><button type="button" data-courses disabled={!data.encryptionReady}>保存并读取课程</button></p>
         <h2>2. 选择课程</h2>
         {courses.length?courses.map(c=><label><input type="checkbox" name="courseId" value={c.id} checked={selected.has(c.id)} /> {c.name}<span class="muted"> · {c.code}</span></label>):<p class="muted">连接成功后，课程列表会出现在这里。</p>}

@@ -1,0 +1,20 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import {env} from 'cloudflare:workers';
+import {config,type StudyEnv} from '../../../server/study';
+import {singapore} from '../../../server/ntu/core';
+import '../../../styles/study.css';
+if(!Astro.locals.adminSession)return Astro.redirect('/admin/login?next=%2Fadmin%2Fstudy%2Fsettings');
+const e=env as unknown as StudyEnv,c=await config(e);
+const runs=(await e.DB.prepare("SELECT * FROM automation_runs WHERE workflow='ntu-sync' ORDER BY started_at DESC LIMIT 10").all<Record<string,any>>()).results??[];
+const labels:Record<string,string>={completed:'已完成',running:'同步中',partial:'部分完成',needs_auth:'需要更新学校登录',failed:'失败',interrupted:'等待恢复'};
+const running=runs.some(r=>r.status==='running'&&r.lease_until>Date.now()),pending=!!c.sync_requested||running;
+const counts=(raw:string)=>{try{const r=JSON.parse(raw);return `下载 ${r.downloaded??0} 个 · 未变化 ${r.unchanged??0} 个`;}catch{return '';}};
+---
+<BaseLayout title="学校同步设置"><meta slot="head" name="robots" content="noindex,nofollow" />
+  <main class="study-shell"><nav><a href="/admin/study">← 课程资料</a><a href="/admin/ntu#settings">学校连接与公告</a></nav><h1>学校同步设置</h1><p>学校自动下载是可选来源。即使学校登录过期，也可以正常上传、整理和下载自己的文件。</p>
+    <section class="panel" data-sync-pending={String(pending)}><h2>立即同步学校文件</h2><p>使用服务器已保存的学校登录，检查所选课程并下载新文件。本机浏览器已登录 NTULearn，不代表服务器也已登录。</p><button id="sync-now" disabled={pending}>{running?'正在同步…':pending?'等待服务器执行…':'立即同步'}</button><p role="status">{pending?'已安排同步，通常一分钟内开始。此页会自动刷新结果。':'只执行一次，不改变下面的自动同步设置。'}</p><a href="/admin/ntu#settings">检查或更新学校连接</a></section>
+    <section class="panel"><strong>{c.enabled?'学校文件同步已开启':'学校文件同步已暂停'}</strong><form id="study-settings" data-revision={c.revision}><label><input type="checkbox" name="enabled" checked={!!c.enabled} /> 自动同步已选课程的学校文件</label><label>检查频率<select name="intervalMinutes">{[30,60,120,360].map(n=><option value={n} selected={n===c.interval_minutes}>每 {n} 分钟</option>)}</select></label><button type="submit">保存设置</button></form></section>
+    <section class="panel"><h2>最近同步记录</h2>{!runs.length&&<p>尚无同步记录。</p>}{runs.map(r=><div class="entry"><strong>{labels[r.status]??r.status} · {singapore(r.started_at)}</strong>{r.result&&<p>{counts(r.result)}</p>}{r.error&&<p class="error">{r.error}</p>}</div>)}</section><div id="feedback" role="status" hidden></div>
+  </main>
+</BaseLayout><script>import '../../../scripts/study';</script>

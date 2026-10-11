@@ -1,12 +1,15 @@
 import type { APIRoute } from 'astro';
 import {env} from 'cloudflare:workers';
-import {config,saveConfig,enqueue,reply,type StudyEnv} from '../../../../server/study';
+import {config,saveConfig,enqueue,reply,requestSync,type StudyEnv} from '../../../../server/study';
 import {safeError} from '../../../../server/ntu/core';
+import {libraryAction} from '../../../../server/study-library';
 export const POST:APIRoute=async({request,locals})=>{
   if(!locals.adminSession)return reply({error:'UNAUTHORIZED'},401);
   try{
     const raw=await request.text();if(raw.length>5000)return reply({error:'TOO_LARGE'},413);
     const body=JSON.parse(raw),e=env as unknown as StudyEnv;
+    if(body.action==='sync-now')return reply(await requestSync(e));
+    if(['create-course','create-folder','move-file'].includes(body.action))return reply(await libraryAction(e,body));
     if(body.action==='save-sync'){const current=await config(e);await saveConfig(e,{...body,autoAnalyze:false,dailyJobs:current.daily_jobs,model:current.model});}
     else if(body.action==='save')await saveConfig(e,body);
     else if(body.action==='analyze'&&typeof body.versionId==='string')return reply(await enqueue(e,body.versionId));

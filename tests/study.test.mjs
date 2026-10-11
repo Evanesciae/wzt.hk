@@ -7,17 +7,25 @@ import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {build} from 'esbuild';
 const dir=await mkdtemp(join(tmpdir(),'study-test-'));
-await build({entryPoints:['src/server/study.ts','src/server/study-markdown.ts','src/server/ntu/service.ts','src/server/ntu/core.ts'],outdir:dir,bundle:true,platform:'node',format:'esm',packages:'external'});
+await build({entryPoints:['src/server/study.ts','src/server/study-library.ts','src/server/study-markdown.ts','src/server/ntu/service.ts','src/server/ntu/core.ts','src/server/ntu/browser.ts'],outdir:dir,bundle:true,platform:'node',format:'esm',packages:'external'});
 // Resolve external dependencies from this worktree instead of the temporary bundle.
 const {symlink}=await import('node:fs/promises');await symlink(join(process.cwd(),'node_modules'),join(dir,'node_modules'));
 const svc=await import(pathToFileURL(join(dir,'study.js'))),ntu=await import(pathToFileURL(join(dir,'ntu/service.js'))),core=await import(pathToFileURL(join(dir,'ntu/core.js')));
 const {studyMarkdown}=await import(pathToFileURL(join(dir,'study-markdown.js')));
-const schema=(await Promise.all(['0015_ntu_notifications.sql','0016_study_pipeline.sql'].map(p=>readFile('migrations/'+p,'utf8')))).join('\n');
+const browser=await import(pathToFileURL(join(dir,'ntu/browser.js')));
+const library=await import(pathToFileURL(join(dir,'study-library.js')));
+const schema=(await Promise.all(['0015_ntu_notifications.sql','0016_study_pipeline.sql','0017_ntu_browser.sql','0018_study_library.sql','0019_study_sync_request.sql'].map(p=>readFile('migrations/'+p,'utf8')))).join('\n');
+test('manual sync bypasses schedule once while preserving paused automatic sync',async()=>{
+ const f=await fixture();await svc.finishRun(f.env,{runId:f.run.id,status:'completed'});f.db.exec('UPDATE study_settings SET enabled=0');
+ await svc.requestSync(f.env);await svc.requestSync(f.env);const c=await svc.runnerConfig(f.env);assert.equal(c.syncRequested,true);assert.equal(c.enabled,true);assert.equal(c.glmKey,null);
+ const r=await svc.beginRun(f.env);assert.ok(r.id);assert.equal((await svc.beginRun(f.env)).id,null);await svc.liveRun(f.env,r.id);
+ await svc.finishRun(f.env,{runId:r.id,status:'needs_auth'});assert.equal((await svc.runnerConfig(f.env)).enabled,false);assert.equal((await svc.config(f.env)).sync_requested,0);f.db.close();
+});
 after(()=>rm(dir,{recursive:true,force:true}));
 async function fixture(){
   const db=new DatabaseSync(':memory:');db.exec(schema);const objects=new Map();
   const wrap=(sql,args=[])=>({bind:(...a)=>wrap(sql,a),first:async()=>db.prepare(sql).get(...args)??null,all:async()=>({results:db.prepare(sql).all(...args)}),run:async()=>({meta:{changes:Number(db.prepare(sql).run(...args).changes)}})});
-  const env={NTU_ENCRYPTION_KEY:Buffer.alloc(32,8).toString('base64'),NTU_RUNNER_TOKEN:'x'.repeat(48),MEDIA:{put:async(k,v)=>objects.set(k,new Uint8Array(v)),get:async k=>objects.has(k)?{body:objects.get(k)}:null},DB:{prepare:wrap,batch:async statements=>{db.exec('BEGIN');try{const out=[];for(const s of statements)out.push(await s.run());db.exec('COMMIT');return out;}catch(e){db.exec('ROLLBACK');throw e;}}}};
+  const env={NTU_BROWSER_TOKEN:'b'.repeat(48),NTU_ENCRYPTION_KEY:Buffer.alloc(32,8).toString('base64'),NTU_RUNNER_TOKEN:'x'.repeat(48),MEDIA:{delete:async k=>objects.delete(k),put:async(k,v)=>objects.set(k,new Uint8Array(v)),get:async k=>objects.has(k)?{body:objects.get(k)}:null},DB:{prepare:wrap,batch:async statements=>{db.exec('BEGIN');try{const out=[];for(const s of statements)out.push(await s.run());db.exec('COMMIT');return out;}catch(e){db.exec('ROLLBACK');throw e;}}}};
   db.prepare('INSERT INTO ntu_courses(id,name,code,updated_at) VALUES(?,?,?,?)').run('_1_1','SC1001','SC1001',new Date().toISOString());
   await ntu.saveSettings(env,{revision:0,config:{...core.defaults,courseIds:['_1_1']},secrets:{cookie:'private-cookie',glmKey:'private-glm'}});
   await svc.saveConfig(env,{revision:0,enabled:true,autoAnalyze:true,intervalMinutes:60,dailyJobs:2,model:''});
@@ -63,4 +71,68 @@ test('model markdown strips active HTML and remote images while rendering math',
   const html=studyMarkdown('# Lesson\n\n<script>alert(1)</script><img src="https://evil.test/x"><a href="javascript:alert(1)">bad</a>\n\n$x^2$');
   assert.ok(!html.includes('<script'));assert.ok(!html.includes('<img'));assert.ok(!html.includes('javascript:'));assert.match(html,/katex/);
   const dangerous=studyMarkdown('$\\href{javascript:alert(1)}{click}$');assert.ok(!dangerous.includes('href="javascript:'));
+});
+
+test('manual library works without school credentials, versions duplicates and keeps private originals',async()=>{
+  const f=await fixture();f.db.exec("UPDATE ntu_settings SET secrets='{}'; UPDATE study_settings SET enabled=0");
+  const course=await library.libraryAction(f.env,{action:'create-course',code:'EE6406',name:'Machine Learning'});
+  assert.equal(f.db.prepare('SELECT count(*) n FROM study_folders WHERE course_id=?').get(course.id).n,3);
+  const folder=await library.libraryAction(f.env,{action:'create-folder',courseId:course.id,folderId:`default:${course.id}:materials`,name:'第 1 周'});
+  const send=(text,folderId=folder.id)=>library.manualUpload(f.env,new Request('https://wzt.hk/api/admin/study/upload',{method:'POST',headers:{'x-course-id':course.id,'x-folder-id':folderId,'x-file-name':encodeURIComponent('课件.pdf')},body:text}));
+  const first=await send('first file'),again=await send('first file');assert.equal(first.id,again.id);assert.equal(again.duplicate,true);
+  const second=await send('second file');assert.equal(first.id,second.id);assert.notEqual(first.versionId,second.versionId);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM study_versions').get().n,2);
+  assert.equal(await (await svc.fileResponse(f.env,first.versionId)).text(),'first file');
+  assert.equal(await (await svc.fileResponse(f.env,second.versionId)).text(),'second file');
+  assert.ok([...f.objects.keys()].every(k=>k.startsWith('private/study/')));
+  assert.equal(f.db.prepare('SELECT count(*) n FROM automation_jobs').get().n,0);
+  await library.libraryAction(f.env,{action:'move-file',courseId:course.id,folderId:null,id:first.id});
+  const moved=await send('third file','');assert.equal(moved.id,first.id);
+  const separate=await send('different file in original folder');assert.notEqual(separate.id,first.id);
+  f.db.close();
+});
+test('library rejects cross-course folders, duplicate folders and over-limit streams',async()=>{
+  const f=await fixture();const course=await library.libraryAction(f.env,{action:'create-course',name:'Another course',code:'OTHER'});
+  const folder=await library.libraryAction(f.env,{action:'create-folder',courseId:'_1_1',name:'Lecture'});
+  await assert.rejects(library.libraryAction(f.env,{action:'create-folder',courseId:'_1_1',name:'Lecture'}),/同名/);
+  await assert.rejects(library.libraryAction(f.env,{action:'create-folder',courseId:course.id,folderId:folder.id,name:'Wrong'}),/不属于/);
+  await assert.rejects(library.libraryAction(f.env,{action:'create-folder',courseId:'_1_1',name:'../escape'}),/斜杠/);
+  const headers={'x-course-id':'_1_1','x-file-name':'big.pdf'};
+  const body=new ReadableStream({start(controller){controller.enqueue(new Uint8Array(svc.MAX_FILE+1));controller.close();}});
+  await assert.rejects(library.manualUpload(f.env,new Request('https://wzt.hk',{method:'POST',headers,body,duplex:'half'})),/25 MB/);
+  assert.equal(f.objects.size,0);assert.equal(f.db.prepare('SELECT count(*) n FROM study_sources').get().n,0);f.db.close();
+});
+
+test('remote browser token is isolated; commands encrypted, single-use and session-bound',async()=>{
+  const f=await fixture();
+  assert.equal(await browser.authorized(f.env,new Request('https://wzt.hk',{headers:{Authorization:'Bearer '+'x'.repeat(48)}})),false);
+  assert.equal(await browser.authorized(f.env,new Request('https://wzt.hk',{headers:{Authorization:'Bearer '+'b'.repeat(48)}})),true);
+  const start=await browser.control(f.env,{action:'start'});
+  await browser.control(f.env,{action:'input',sessionId:start.sessionId,command:{type:'text',text:'private-password'}});
+  assert.ok(!f.db.prepare('SELECT payload FROM ntu_browser_commands').get().payload.includes('private-password'));
+  const first=await browser.tick(f.env);assert.equal(first.command.text,'private-password');assert.equal('cookie' in first,false);
+  assert.equal((await browser.tick(f.env)).command,null);
+  await browser.control(f.env,{action:'input',sessionId:start.sessionId,command:{type:'text',text:'expired'}});
+  f.db.exec('UPDATE ntu_browser_commands SET expires=0');assert.equal((await browser.tick(f.env)).command,null);
+  const second=await browser.control(f.env,{action:'start'});
+  await assert.rejects(browser.control(f.env,{action:'input',sessionId:start.sessionId,command:{type:'key',key:'Enter'}}));
+  await assert.rejects(browser.control(f.env,{action:'input',sessionId:second.sessionId,command:{type:'key',key:'Control+L'}}));
+  f.db.close();
+});
+test('browser cookie updates preserve settings and reject stale writers; pause revokes input and frames',async()=>{
+  const f=await fixture(),start=await browser.control(f.env,{action:'start'}),initial=await ntu.settings(f.env,true);
+  const input={sessionId:start.sessionId,status:'connected',cookie:'expires:1999999999,id:test',revision:initial.revision,userAgent:'test-browser'};
+  await browser.report(f.env,input);
+  const saved=await ntu.settings(f.env,true);assert.equal(saved.secrets.cookie,input.cookie);assert.equal(saved.secrets.glmKey,initial.secrets.glmKey);assert.deepEqual(saved.config,initial.config);
+  await assert.rejects(browser.report(f.env,{...input,cookie:'expires:1999999999,id:stale'}));
+  const bytes=new Uint8Array([255,216,255,224]);
+  await browser.putFrame(f.env,new Request('https://wzt.hk',{method:'POST',headers:{'content-type':'image/jpeg','content-length':'4','x-browser-session':start.sessionId},body:bytes}));
+  assert.equal((await browser.getFrame(f.env,start.sessionId)).status,200);
+  assert.equal((await browser.getFrame(f.env,'wrong')).status,410);
+  await browser.control(f.env,{action:'pause',sessionId:start.sessionId});
+  assert.equal((await browser.getFrame(f.env,start.sessionId)).status,410);
+  assert.equal(f.objects.size,0);
+  await assert.rejects(browser.report(f.env,{...input,revision:saved.revision}));
+  await assert.rejects(browser.control(f.env,{action:'input',sessionId:start.sessionId,command:{type:'text',text:'ignored'}}));
+  assert.equal((await browser.tick(f.env)).enabled,false);f.db.close();
 });

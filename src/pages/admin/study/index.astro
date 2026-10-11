@@ -1,41 +1,58 @@
 ---
 import BaseLayout from '../../../layouts/BaseLayout.astro';
 import {env} from 'cloudflare:workers';
-import {config,type StudyEnv,type Source} from '../../../server/study';
+import {type StudyEnv,type Source} from '../../../server/study';
+import {type Folder} from '../../../server/study-library';
+import {settings} from '../../../server/ntu/service';
 import {singapore} from '../../../server/ntu/core';
 import '../../../styles/study.css';
+import '../../../styles/study-library.css';
 if(!Astro.locals.adminSession)return Astro.redirect('/admin/login?next=%2Fadmin%2Fstudy');
-const e=env as unknown as StudyEnv,c=await config(e);
-const page=Math.max(0,Math.min(1000,Number(Astro.url.searchParams.get('page'))||0));
-const sources=(await e.DB.prepare('SELECT s.*,c.name AS course_name FROM study_sources s LEFT JOIN ntu_courses c ON c.id=s.course_id ORDER BY s.updated_at DESC LIMIT 51 OFFSET ?').bind(Math.floor(page)*50).all<Source&{course_name:string}>()).results ?? [];
-const runs=(await e.DB.prepare("SELECT * FROM automation_runs ORDER BY started_at DESC LIMIT 10").all<Record<string,any>>()).results ?? [];
-const jobs=(await e.DB.prepare('SELECT j.*,s.title FROM automation_jobs j JOIN study_sources s ON s.id=j.source_id ORDER BY j.updated_at DESC LIMIT 20').all<Record<string,any>>()).results ?? [];
-const labels:Record<string,string>={completed:'已完成',running:'同步中',partial:'部分完成',needs_auth:'需要更新登录',failed:'失败',interrupted:'等待恢复',pending:'排队中',processing:'处理中',needs_ocr:'需要文字识别'};
+const e=env as unknown as StudyEnv;
+const courses=(await e.DB.prepare('SELECT c.*,COUNT(s.id) AS files,COUNT(s.version_id) AS saved FROM ntu_courses c LEFT JOIN study_sources s ON s.course_id=c.id GROUP BY c.id ORDER BY c.name').all<{id:string;name:string;code:string;files:number;saved:number}>()).results??[];
+const selected=(await settings(e)).config.courseIds;
+const visibleCourses=courses.filter(c=>c.id.startsWith('local:')||selected.includes(c.id)||c.files);
+const course=courses.find(c=>c.id===Astro.url.searchParams.get('course'));
+const folders=course?(await e.DB.prepare('SELECT * FROM study_folders WHERE course_id=? ORDER BY name').bind(course.id).all<Folder>()).results??[]:[];
+const folderId=Astro.url.searchParams.get('folder')||null;
+const folder=folders.find(f=>f.id===folderId);
+if((Astro.url.searchParams.has('course')&&!course)||(folderId&&!folder))return new Response('课程或文件夹不存在',{status:404});
+const breadcrumbs:Folder[]=[];let cursor=folder;
+while(cursor&&breadcrumbs.length<12){breadcrumbs.unshift(cursor);cursor=folders.find(f=>f.id===cursor!.parent_id);}
+const children=folders.filter(f=>f.parent_id===folderId);
+const page=Math.max(0,Math.min(10000,Math.floor(Number(Astro.url.searchParams.get('page'))||0)));
+const sources=course?(await e.DB.prepare('SELECT s.*,v.size FROM study_sources s LEFT JOIN study_versions v ON v.id=s.version_id WHERE s.course_id=? AND s.folder_id IS ? ORDER BY s.title,s.id LIMIT 51 OFFSET ?').bind(course.id,folderId,page*50).all<Source&{size:number;origin:string}>()).results??[]:[];
+const link=(fid:string|null=null,p=0)=>`/admin/study?course=${encodeURIComponent(course!.id)}${fid?'&folder='+encodeURIComponent(fid):''}${p?'&page='+p:''}`;
+const folderPath=(f:Folder)=>{let out=f.name,p=f.parent_id,n=0;while(p&&n++<12){const parent=folders.find(x=>x.id===p);if(!parent)break;out=parent.name+' / '+out;p=parent.parent_id;}return out;};
+const size=(n:number)=>n>=1048576?`${(n/1048576).toFixed(1)} MB`:`${Math.ceil(n/1024)} KB`;
 ---
 <BaseLayout title="课程资料" brandHref="/">
   <meta slot="head" name="robots" content="noindex,nofollow" />
-  <main class="study-shell">
-    <nav><a href="/admin">← 管理中心</a><a class="button" href="/admin/ntu#settings">连接学校 / 选择课程</a></nav>
-    <header><h1>课程资料 <span class="badge">私人</span></h1><p class="muted">集中保存课件、作业要求和公告，供你查看，也为后续 Muse 使用做准备。</p></header>
-    <section class="panel"><strong>{c.enabled?'文件同步已开启':'文件同步已暂停'}</strong><p class="muted">{runs[0]?`最近检查：${singapore(runs[0].started_at)} · ${labels[runs[0].status]??runs[0].status}`:'尚未开始同步。先连接学校并选择课程，再开启下方的文件同步。'}</p>
-      {runs[0]?.error&&<p class="error">{runs[0].error}</p>}
-      <details open><summary>课程文件同步</summary>
-        <form id="study-settings" data-revision={c.revision}>
-          <label><input type="checkbox" name="enabled" checked={!!c.enabled} /> 自动同步课程文件</label>
-          <label>检查频率<select name="intervalMinutes">{[30,60,120,360].map(n=><option value={n} selected={n===c.interval_minutes}>每 {n} 分钟</option>)}</select></label>
-          <p class="muted">服务器会自动保存已选课程的新文件。首次导入只建立资料记录。</p>
-          <button class="primary" type="submit">保存同步设置</button>
-        </form>
-      </details>
-    </section>
-    <section><h2>课程文件</h2>
-      {!sources.length&&<p class="empty">还没有课程文件。连接学校并选择课程后，请在上方开启文件同步。</p>}
-      {sources.slice(0,50).map(s=><article class="entry"><a href={`/admin/study/${s.id}`}><strong>{s.title}</strong></a><p class="muted">{s.course_name||s.course_id} · {s.kind==='assignment'?'Assignment':'课件'} · {s.version_id?'原件已保存':'等待下载或重试'} · {singapore(s.updated_at)}</p></article>)}
-      <nav>{page>0&&<a href={`?page=${page-1}`}>上一页</a>}{sources.length>50&&<a href={`?page=${page+1}`}>下一页</a>}</nav>
-    </section>
-    {jobs.length>0&&<section class="panel"><h2>历史处理记录</h2>{jobs.map(j=><div class="entry"><a href={`/admin/study/${j.source_id}`}>{j.title}</a><p class="muted">{labels[j.status]??j.status}</p>{j.error&&<p class="error">{j.error}</p>}</div>)}</section>}
-    <details class="panel"><summary>最近 10 次同步记录</summary>{runs.map(r=><div class="entry"><strong>{labels[r.status]??r.status} · {singapore(r.started_at)}</strong>{r.result&&<p class="muted">{r.result}</p>}{r.error&&<p class="error">{r.error}</p>}</div>)}</details>
-    <div id="feedback" role="status" hidden></div>
+  <main class="study-shell library" data-course={course?.id??''} data-folder={folderId??''}>
+    <nav><a href="/admin">← 管理中心</a><a href="/admin/study/settings">学校同步设置与记录</a></nav>
+    <header><div><span class="eyebrow">NTU · 私人资料库</span><h1>课程资料</h1><p class="muted">按课程与文件夹整理课件、作业和笔记。上传与阅读不需要学校登录。</p></div><a class="button" href="/admin/study">全部课程</a></header>
+    <div class="library-layout">
+      <aside class="library-sidebar"><h2>我的课程</h2><nav aria-label="课程列表">{visibleCourses.map(c=><a href={`/admin/study?course=${encodeURIComponent(c.id)}`} aria-current={course?.id===c.id?'page':undefined}><strong>{c.code}</strong><span>{c.name}</span><small>{c.saved} 个已保存文件</small></a>)}</nav>
+        <details><summary>＋ 新建课程</summary><form data-library-action="create-course"><label>课程代码<input name="code" placeholder="例如 EE6406" required maxlength="180" /></label><label>课程名称<input name="name" placeholder="例如 机器学习" required maxlength="180" /></label><button type="submit">创建课程</button></form></details>
+      </aside>
+      <section class="library-content">
+      {!course?<>
+        <h2>选择一门课程</h2><div class="course-grid">{visibleCourses.map(c=><a class="course-card" href={`/admin/study?course=${encodeURIComponent(c.id)}`}><span class="eyebrow">{c.code}</span><h3>{c.name}</h3><p>{c.saved} 个已保存文件{c.files>c.saved?` · ${c.files-c.saved} 条学校资料记录`:''}</p><span>打开课程 →</span></a>)}</div>
+        {!visibleCourses.length&&<p class="empty">先在左侧新建课程，即可创建文件夹并上传资料。</p>}
+        <p class="muted">可以按“课件 / 第 1 周”“作业 / Assignment 1”等方式创建文件夹。</p>
+      </>:<>
+        <nav class="breadcrumbs" aria-label="文件夹路径"><a href={link()}>{course.name}</a>{breadcrumbs.map(f=><><span aria-hidden="true">/</span><a href={link(f.id)} aria-current={f.id===folderId?'location':undefined}>{f.name}</a></>)}</nav>
+        <h2>{folder?.name??'课程根目录'}</h2>
+        <section id="upload-zone" class="upload-zone"><strong>上传到：{breadcrumbs.map(f=>f.name).join(' / ')||course.code}</strong><p>拖入文件，或选择多个文件批量上传</p><label class="button">选择文件<input id="library-files" type="file" multiple /></label><p class="muted">每个文件最大 25 MB。同目录同名文件保存新版本；相同内容不重复创建版本。</p></section>
+        <section id="upload-results" hidden aria-live="polite"><h3>上传进度</h3><ul id="upload-list"></ul><button id="retry-uploads" type="button" hidden>重试失败文件</button><a id="show-uploaded" class="button" href={link()} hidden>查看上传后的文件</a></section>
+        <details class="new-folder"><summary>＋ 新建文件夹</summary><form data-library-action="create-folder"><label>文件夹名称<input name="name" placeholder="例如 课件、作业、第 1 周" required maxlength="180" /></label><button type="submit">创建文件夹</button></form></details>
+        <div class="folder-grid">{children.map(f=><a href={link(f.id)} class="folder-card"><span aria-hidden="true">▱</span><strong>{f.name}</strong><span aria-hidden="true">→</span></a>)}</div>
+        {sources.length>0?<div class="library-files">{sources.slice(0,50).map(s=><article class="file-row"><div><a href={`/admin/study/${s.id}`} class="file-title">{s.title}</a><p class="muted">{s.origin==='upload'?'上传文件':'学校资料'} · {s.version_id?size(s.size):'尚无原件'} · {singapore(s.updated_at)}</p></div><div class="file-actions">{s.version_id&&<a class="button" href={`/api/admin/study/files/${s.version_id}`}>下载</a>}<details><summary>移动</summary><form data-library-action="move-file"><input type="hidden" name="id" value={s.id} /><label>目标文件夹<select name="folderId"><option value="">课程根目录</option>{folders.map(f=><option value={f.id} selected={f.id===folderId}>{folderPath(f)}</option>)}</select></label><button type="submit">移动文件</button></form></details></div></article>)}</div>:<p class="empty">当前目录还没有文件。可以直接上传，或先创建子文件夹。</p>}
+        <nav>{page>0&&<a href={link(folderId,page-1)}>上一页</a>}{sources.length>50&&<a href={link(folderId,page+1)}>下一页</a>}</nav>
+      </>}
+      </section>
+    </div>
+    <p id="library-feedback" role="status"></p>
   </main>
 </BaseLayout>
-<script>import '../../../scripts/study';</script>
+<script>import '../../../scripts/study-library';</script>

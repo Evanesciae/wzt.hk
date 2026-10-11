@@ -15,7 +15,7 @@ export async function seal(env:NtuEnv,name:string,text:string) {
   const bytes = new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:new TextEncoder().encode(name)},await key(env),new TextEncoder().encode(text)));
   return btoa(String.fromCharCode(...iv,...bytes));
 }
-async function unseal(env:NtuEnv,name:string,text:string) {
+export async function unseal(env:NtuEnv,name:string,text:string) {
   const bytes = Uint8Array.from(atob(text),c=>c.charCodeAt(0));
   return new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:bytes.slice(0,12),additionalData:new TextEncoder().encode(name)},await key(env),bytes.slice(12)));
 }

@@ -2,13 +2,21 @@ import { settings, type NtuEnv } from './ntu/service';
 import { hash, iso, NtuError } from './ntu/core';
 
 export interface StudyEnv extends NtuEnv { MEDIA: R2Bucket; NTU_RUNNER_TOKEN?: string }
-export interface StudyConfig { enabled:number; auto_analyze:number; interval_minutes:number; model:string; revision:number; daily_jobs:number }
+export interface StudyConfig { enabled:number; auto_analyze:number; interval_minutes:number; model:string; revision:number; daily_jobs:number; sync_requested:number }
 export interface Source {id:string;course_id:string;content_id:string;title:string;kind:string;source_url:string;body:string;due_at:string|null;fingerprint:string;checked_at:string;version_id:string|null;created_at:string;updated_at:string}
 export const PROCESSOR = 'study-v1';
 export const MAX_FILE = 25 * 1024 * 1024;
 const now = () => new Date().toISOString();
 export const reply = (value:unknown,status=200) => Response.json(value,{status,headers:{'Cache-Control':'private, no-store','CDN-Cache-Control':'no-store'}});
 export async function config(env:StudyEnv) { return (await env.DB.prepare('SELECT * FROM study_settings WHERE id=1').first<StudyConfig>())!; }
+export async function requestSync(env:StudyEnv) {
+  const ntu=await settings(env);
+  if(!ntu.configured.cookie||!ntu.config.courseIds.length)throw new NtuError('请先连接学校账号并选择课程。本机学校登录不会自动传给服务器。');
+  const running=await env.DB.prepare("SELECT id FROM automation_runs WHERE workflow='ntu-sync' AND status='running' AND lease_until>?").bind(Date.now()).first();
+  if(running)return {message:'已有文件同步正在执行，请稍后查看结果。'};
+  await env.DB.prepare('UPDATE study_settings SET sync_requested=? WHERE id=1 AND sync_requested=0').bind(Date.now()).run();
+  return {message:'已提交文件同步，服务器通常会在一分钟内开始。'};
+}
 export async function runnerAuthorized(env:StudyEnv, request:Request) {
   if(!env.NTU_RUNNER_TOKEN || env.NTU_RUNNER_TOKEN.length < 32) return false;
   const value = request.headers.get('authorization') ?? '';
@@ -21,8 +29,9 @@ export async function runnerConfig(env:StudyEnv) {
   const c=await config(env), ntu=await settings(env,true);
   const ready=!!ntu.secrets.cookie && ntu.config.courseIds.length>0;
   const last=await env.DB.prepare("SELECT * FROM automation_runs WHERE workflow='ntu-sync' ORDER BY started_at DESC LIMIT 1").first<{id:string;status:string;started_at:string;lease_until:number}>();
-  return {enabled:!!c.enabled,ready,autoAnalyze:!!c.auto_analyze,intervalMinutes:c.interval_minutes,model:c.model || ntu.config.model,
-    courseIds:ntu.config.courseIds,cookie:c.enabled?ntu.secrets.cookie:null,glmKey:c.enabled?ntu.secrets.glmKey:null,last,
+  const browser=await env.DB.prepare('SELECT user_agent FROM ntu_browser WHERE id=1 AND enabled=1').first<{user_agent:string}>();
+  return {userAgent:browser?.user_agent||undefined,enabled:!!c.enabled||!!c.sync_requested,syncRequested:!!c.sync_requested,ready,autoAnalyze:!!c.enabled&&!!c.auto_analyze,intervalMinutes:c.interval_minutes,model:c.model || ntu.config.model,
+    courseIds:ntu.config.courseIds,cookie:c.enabled||c.sync_requested?ntu.secrets.cookie:null,glmKey:c.enabled?ntu.secrets.glmKey:null,last,
     // The runner never receives admin sessions, Cloudflare tokens or Telegram credentials.
     baselineCourses:(await env.DB.prepare('SELECT course_id FROM study_course_state').all<{course_id:string}>()).results!.map(r=>r.course_id),processorVersion:PROCESSOR};
 }
@@ -41,15 +50,15 @@ export async function manifest(env:StudyEnv,offset:number) {
   return {sources:rows.filter(s=>ntu.config.courseIds.includes(s.course_id)),next:rows.length===500?offset+500:null};
 }
 export async function beginRun(env:StudyEnv) {
-  const c=await config(env);if(!c.enabled)throw new NtuError('同步已暂停。');
+  const c=await config(env);if(!c.enabled&&!c.sync_requested)throw new NtuError('同步已暂停。');
   const id=crypto.randomUUID(), time=Date.now();
   await env.DB.prepare("UPDATE automation_runs SET status='interrupted',finished_at=?,error='服务器任务中断，等待下一轮恢复' WHERE workflow='ntu-sync' AND status='running' AND lease_until<?").bind(now(),time).run();
-  const r=await env.DB.prepare("INSERT INTO automation_runs(id,workflow,status,started_at,lease_until) SELECT ?,'ntu-sync','running',?,? WHERE NOT EXISTS(SELECT 1 FROM automation_runs WHERE workflow='ntu-sync' AND (status='running' OR started_at>?))").bind(id,now(),time+15*60000,new Date(time-c.interval_minutes*60000).toISOString()).run();
+  const r=await env.DB.prepare("INSERT INTO automation_runs(id,workflow,status,started_at,lease_until) SELECT ?,'ntu-sync','running',?,? WHERE NOT EXISTS(SELECT 1 FROM automation_runs WHERE workflow='ntu-sync' AND (status='running' OR (?=0 AND started_at>?)))").bind(id,now(),time+15*60000,c.sync_requested,new Date(time-c.interval_minutes*60000).toISOString()).run();
   return {id:r.meta.changes?id:null};
 }
 export async function liveRun(env:StudyEnv,id:unknown) {
   if(typeof id!=='string')throw new NtuError('缺少同步标识。');
-  const c=await config(env);if(!c.enabled)throw new NtuError('同步已暂停。');
+  const c=await config(env);if(!c.enabled&&!c.sync_requested)throw new NtuError('同步已暂停。');
   const r=await env.DB.prepare("UPDATE automation_runs SET lease_until=? WHERE id=? AND workflow='ntu-sync' AND status='running' AND lease_until>?").bind(Date.now()+15*60000,id,Date.now()).run();
   if(!r.meta.changes)throw new NtuError('同步任务已过期。');
 }
@@ -61,6 +70,7 @@ export async function finishRun(env:StudyEnv,input:Record<string,any>) {
   for(const courseId of Array.isArray(input.completedCourses)?input.completedCourses:[])if(ntu.config.courseIds.includes(courseId))await env.DB.prepare('INSERT OR IGNORE INTO study_course_state(course_id,baseline_at) VALUES(?,?)').bind(courseId,now()).run();
   await env.DB.prepare("UPDATE automation_runs SET status=?,finished_at=?,result=?,error=?,lease_until=0 WHERE id=? AND status='running'")
     .bind(input.status,now(),JSON.stringify(input.counts??{}).slice(0,3000),String(input.error??'').slice(0,1000)||null,String(input.runId)).run();
+  await env.DB.prepare('UPDATE study_settings SET sync_requested=0 WHERE id=1').run();
   if(input.status!=='completed') {
     const text=input.status==='needs_auth'?'课程文件同步需要更新学校登录 Cookie。':'课程文件同步部分失败，请在私有课程资料页查看。';
     await env.DB.prepare("INSERT OR IGNORE INTO ntu_delivery(id,category,text,created_at) VALUES(?,'health',?,?)")
