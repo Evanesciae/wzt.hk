@@ -8,7 +8,7 @@ import '../../../styles/study.css';
 import 'katex/dist/katex.min.css';
 if(!Astro.locals.adminSession)return Astro.redirect('/admin/login?next='+encodeURIComponent(Astro.url.pathname));
 const e=env as unknown as StudyEnv;
-const s=await e.DB.prepare('SELECT * FROM study_sources WHERE id=?').bind(Astro.params.id??'').first<Source>();
+const s=await e.DB.prepare('SELECT * FROM study_sources WHERE id=?').bind(Astro.params.id??'').first<Source&{folder_id:string|null;origin:string}>();
 if(!s)return new Response('资料不存在',{status:404});
 const versions=(await e.DB.prepare('SELECT * FROM study_versions WHERE source_id=? ORDER BY created_at DESC').bind(s.id).all<Record<string,any>>()).results ?? [];
 const notes=(await e.DB.prepare('SELECT * FROM study_notes WHERE source_id=? ORDER BY created_at DESC').bind(s.id).all<Record<string,any>>()).results ?? [];
@@ -16,7 +16,7 @@ const current=notes.find(n=>n.version_id===s.version_id);
 ---
 <BaseLayout title={s.title} bare brandHref="/admin">
   <meta slot="head" name="robots" content="noindex,nofollow" />
-  <main class="study-shell"><nav><a href="/admin/study">← 课程资料</a><a href={s.source_url} target="_blank" rel="noopener noreferrer">学校原页面 ↗</a></nav>
+  <main class="study-shell"><nav><a href={`/admin/study?course=${encodeURIComponent(s.course_id)}${s.folder_id?'&folder='+encodeURIComponent(s.folder_id):''}`}>← 返回所在文件夹</a>{s.source_url&&<a href={s.source_url} target="_blank" rel="noopener noreferrer">学校原页面 ↗</a>}</nav>
     <header><span class="badge">私人</span><h1>{s.title}</h1><p class="muted">{s.kind==='assignment'?'Assignment':'课程资料'} · 最近更新 {singapore(s.updated_at)}</p></header>
     {s.due_at&&<section class="panel"><strong>截止：{singapore(s.due_at)}</strong><p><a class="button" href={`/api/admin/study/calendar/${s.id}`}>下载日历事项</a></p><p class="muted">下载后可导入你的日历。</p></section>}
     <section class="panel"><h2>原文件</h2><div class="row">{s.version_id?<a class="button" href={`/api/admin/study/files/${s.version_id}`}>下载当前原件</a>:<p>原件尚未下载完成，请查看同步记录。</p>}</div><p class="muted">课程原件保存在这里，后续可交给 Muse 阅读、预习或处理作业。</p>

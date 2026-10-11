@@ -7,13 +7,14 @@ import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {build} from 'esbuild';
 const dir=await mkdtemp(join(tmpdir(),'study-test-'));
-await build({entryPoints:['src/server/study.ts','src/server/study-markdown.ts','src/server/ntu/service.ts','src/server/ntu/core.ts','src/server/ntu/browser.ts'],outdir:dir,bundle:true,platform:'node',format:'esm',packages:'external'});
+await build({entryPoints:['src/server/study.ts','src/server/study-library.ts','src/server/study-markdown.ts','src/server/ntu/service.ts','src/server/ntu/core.ts','src/server/ntu/browser.ts'],outdir:dir,bundle:true,platform:'node',format:'esm',packages:'external'});
 // Resolve external dependencies from this worktree instead of the temporary bundle.
 const {symlink}=await import('node:fs/promises');await symlink(join(process.cwd(),'node_modules'),join(dir,'node_modules'));
 const svc=await import(pathToFileURL(join(dir,'study.js'))),ntu=await import(pathToFileURL(join(dir,'ntu/service.js'))),core=await import(pathToFileURL(join(dir,'ntu/core.js')));
 const {studyMarkdown}=await import(pathToFileURL(join(dir,'study-markdown.js')));
 const browser=await import(pathToFileURL(join(dir,'ntu/browser.js')));
-const schema=(await Promise.all(['0015_ntu_notifications.sql','0016_study_pipeline.sql','0017_ntu_browser.sql'].map(p=>readFile('migrations/'+p,'utf8')))).join('\n');
+const library=await import(pathToFileURL(join(dir,'study-library.js')));
+const schema=(await Promise.all(['0015_ntu_notifications.sql','0016_study_pipeline.sql','0017_ntu_browser.sql','0018_study_library.sql'].map(p=>readFile('migrations/'+p,'utf8')))).join('\n');
 after(()=>rm(dir,{recursive:true,force:true}));
 async function fixture(){
   const db=new DatabaseSync(':memory:');db.exec(schema);const objects=new Map();
@@ -64,6 +65,36 @@ test('model markdown strips active HTML and remote images while rendering math',
   const html=studyMarkdown('# Lesson\n\n<script>alert(1)</script><img src="https://evil.test/x"><a href="javascript:alert(1)">bad</a>\n\n$x^2$');
   assert.ok(!html.includes('<script'));assert.ok(!html.includes('<img'));assert.ok(!html.includes('javascript:'));assert.match(html,/katex/);
   const dangerous=studyMarkdown('$\\href{javascript:alert(1)}{click}$');assert.ok(!dangerous.includes('href="javascript:'));
+});
+
+test('manual library works without school credentials, versions duplicates and keeps private originals',async()=>{
+  const f=await fixture();f.db.exec("UPDATE ntu_settings SET secrets='{}'; UPDATE study_settings SET enabled=0");
+  const course=await library.libraryAction(f.env,{action:'create-course',code:'EE6406',name:'Machine Learning'});
+  assert.equal(f.db.prepare('SELECT count(*) n FROM study_folders WHERE course_id=?').get(course.id).n,3);
+  const folder=await library.libraryAction(f.env,{action:'create-folder',courseId:course.id,folderId:`default:${course.id}:materials`,name:'第 1 周'});
+  const send=(text,folderId=folder.id)=>library.manualUpload(f.env,new Request('https://wzt.hk/api/admin/study/upload',{method:'POST',headers:{'x-course-id':course.id,'x-folder-id':folderId,'x-file-name':encodeURIComponent('课件.pdf')},body:text}));
+  const first=await send('first file'),again=await send('first file');assert.equal(first.id,again.id);assert.equal(again.duplicate,true);
+  const second=await send('second file');assert.equal(first.id,second.id);assert.notEqual(first.versionId,second.versionId);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM study_versions').get().n,2);
+  assert.equal(await (await svc.fileResponse(f.env,first.versionId)).text(),'first file');
+  assert.equal(await (await svc.fileResponse(f.env,second.versionId)).text(),'second file');
+  assert.ok([...f.objects.keys()].every(k=>k.startsWith('private/study/')));
+  assert.equal(f.db.prepare('SELECT count(*) n FROM automation_jobs').get().n,0);
+  await library.libraryAction(f.env,{action:'move-file',courseId:course.id,folderId:null,id:first.id});
+  const moved=await send('third file','');assert.equal(moved.id,first.id);
+  const separate=await send('different file in original folder');assert.notEqual(separate.id,first.id);
+  f.db.close();
+});
+test('library rejects cross-course folders, duplicate folders and over-limit streams',async()=>{
+  const f=await fixture();const course=await library.libraryAction(f.env,{action:'create-course',name:'Another course',code:'OTHER'});
+  const folder=await library.libraryAction(f.env,{action:'create-folder',courseId:'_1_1',name:'Lecture'});
+  await assert.rejects(library.libraryAction(f.env,{action:'create-folder',courseId:'_1_1',name:'Lecture'}),/同名/);
+  await assert.rejects(library.libraryAction(f.env,{action:'create-folder',courseId:course.id,folderId:folder.id,name:'Wrong'}),/不属于/);
+  await assert.rejects(library.libraryAction(f.env,{action:'create-folder',courseId:'_1_1',name:'../escape'}),/斜杠/);
+  const headers={'x-course-id':'_1_1','x-file-name':'big.pdf'};
+  const body=new ReadableStream({start(controller){controller.enqueue(new Uint8Array(svc.MAX_FILE+1));controller.close();}});
+  await assert.rejects(library.manualUpload(f.env,new Request('https://wzt.hk',{method:'POST',headers,body,duplex:'half'})),/25 MB/);
+  assert.equal(f.objects.size,0);assert.equal(f.db.prepare('SELECT count(*) n FROM study_sources').get().n,0);f.db.close();
 });
 
 test('remote browser token is isolated; commands encrypted, single-use and session-bound',async()=>{
